@@ -73,6 +73,7 @@ export default function QuestionsPage() {
       const sum = Object.values(val).reduce((a: number, b: any) => a + Number(b || 0), 0)
       return sum === 100
     }
+    if (q.question_type === 'slider') return true
     return val !== undefined && val !== null && val !== ''
   }
 
@@ -102,7 +103,7 @@ export default function QuestionsPage() {
       session_id: sessionId,
       question_id: q.id,
       participant_id: participantId,
-      answer: answers[q.id],
+            answer: answers[q.id] ?? (q.question_type === 'slider' ? 0 : answers[q.id]),
     }))
 
     const { error: insertError } = await supabase.from('responses').insert(rows)
@@ -138,6 +139,7 @@ if (done) {
           <h1 className="text-lg font-bold text-slate-900 mb-1.5">پاسخ‌های شما ثبت شد</h1>
           <p className="text-sm text-slate-500 mb-6">از مشارکت شما در این پرسشنامه سپاسگزاریم.</p>
           <a href={`/reports/${sessionId}`} className="inline-block bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-6 py-2.5 rounded-md transition">مشاهده‌ی گزارش زنده</a>
+          <button onClick={() => router.back()} className="block w-full text-center text-xs text-slate-400 hover:text-slate-600 mt-5">بازگشت</button>
         </div>
       </div>
     )
@@ -241,9 +243,9 @@ if (done) {
           )}
 
 {q.question_type === 'slider' && (
-            <div>
+            <div dir="ltr">
               {(() => {
-                const val = answers[q.id] ?? Math.round((q.options.min + q.options.max) / 2)
+                const val = answers[q.id] ?? 0
                 const percent = ((val - q.options.min) / (q.options.max - q.options.min)) * 100
                 return (
                   <>
@@ -262,16 +264,16 @@ if (done) {
                       onChange={(e) => setAnswer(q.id, Number(e.target.value))}
                       className="w-full h-2 rounded-full appearance-none cursor-pointer accent-blue-600"
                       style={{
-                        background: `linear-gradient(to left, #2563eb ${percent}%, #e5e7eb ${percent}%)`,
+                        background: `linear-gradient(to right, #2563eb ${percent}%, #e5e7eb ${percent}%)`,
                       }}
                     />
                     <div className="flex justify-between mt-2 text-xs text-gray-400">
                       <span>
-                        {q.options.max}
+                        {q.options.min}
                         {q.options.unit}
                       </span>
                       <span>
-                        {q.options.min}
+                        {q.options.max}
                         {q.options.unit}
                       </span>
                     </div>

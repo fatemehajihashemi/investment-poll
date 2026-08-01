@@ -411,7 +411,7 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
   const toPercent = (val: number) => ((val - axisMin) / (axisMax - axisMin)) * 100
 
   return (
-    <div>
+    <div dir="ltr">
       <div className="text-center mb-5">
         <p className="text-3xl font-bold text-slate-900">
           {median.toFixed(1)}
@@ -424,23 +424,23 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
         <div className="absolute top-1/2 right-2 left-2 h-px bg-slate-200" />
         <div
           className="absolute top-1 bottom-1 w-px bg-slate-400"
-          style={{ right: `calc(${toPercent(median)}% * 0.96 + 8px)` }}
+          style={{ left: `calc(${toPercent(median)}% * 0.96 + 8px)` }}
         />
         {answers.map((val, i) => (
           <div
             key={i}
             className="absolute top-1/2 w-3 h-3 rounded-full bg-slate-900 border-2 border-white shadow-sm"
             style={{
-              right: `calc(${toPercent(val)}% * 0.96 + 8px)`,
-              transform: 'translate(50%, -50%)',
+              left: `calc(${toPercent(val)}% * 0.96 + 8px)`,
+              transform: 'translate(-50%, -50%)',
             }}
             title={`${val}${unit}`}
           />
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-slate-400 px-2 mb-4">
-        <span>{axisMax.toFixed(0)}{unit}</span>
         <span>{axisMin.toFixed(0)}{unit}</span>
+        <span>{axisMax.toFixed(0)}{unit}</span>
       </div>
 
       <div className="flex justify-center">
