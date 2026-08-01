@@ -127,16 +127,17 @@ export default function QuestionsPage() {
       </div>
     )
   }
-
-  if (done) {
+  
+if (done) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-gray-50 to-gray-100 px-4" dir="rtl">
-        <div className="text-center bg-white rounded-3xl shadow-xl p-10 max-w-md w-full">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span className="text-3xl">✅</span>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4" dir="rtl">
+        <div className="text-center bg-white border border-slate-200 rounded-xl p-10 max-w-md w-full">
+          <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-xl text-white">✓</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">پاسخ‌های شما ثبت شد</h1>
-          <p className="text-gray-500">از مشارکت شما در این پرسشنامه سپاسگزاریم.</p>
+          <h1 className="text-lg font-bold text-slate-900 mb-1.5">پاسخ‌های شما ثبت شد</h1>
+          <p className="text-sm text-slate-500 mb-6">از مشارکت شما در این پرسشنامه سپاسگزاریم.</p>
+          <a href={`/reports/${sessionId}`} className="inline-block bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-6 py-2.5 rounded-md transition">مشاهده‌ی گزارش زنده</a>
         </div>
       </div>
     )
