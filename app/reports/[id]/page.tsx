@@ -435,12 +435,22 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
 
   return (
     <div dir="ltr">
-      <div className="text-center mb-5">
-        <p className="text-3xl font-bold text-slate-900">
-          {median.toFixed(1)}
-          <span className="text-lg font-medium text-slate-400">{unit}</span>
-        </p>
-        <p className="text-[11px] text-slate-400 mt-0.5">میانه‌ی نظر کمیته</p>
+      <div className="flex items-center justify-center gap-8 mb-5">
+        <div className="text-center">
+          <p className="text-2xl font-bold text-slate-900">
+            {avg.toFixed(1)}
+            <span className="text-base font-medium text-slate-400">{unit}</span>
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">میانگین</p>
+        </div>
+        <div className="w-px h-10 bg-slate-200" />
+        <div className="text-center">
+          <p className="text-2xl font-bold text-slate-900">
+            {median.toFixed(1)}
+            <span className="text-base font-medium text-slate-400">{unit}</span>
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">میانه</p>
+        </div>
       </div>
 
       <div className="relative h-10 mt-4 mb-1 px-2">
