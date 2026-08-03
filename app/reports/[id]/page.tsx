@@ -26,6 +26,7 @@ type ResponseRow = {
 const CHART_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4']
 const COLOR_BY_NAME: Record<string, string> = {
   'بورس': '#2563eb',
+  'سهام': '#2563eb',
   'طلا': '#f59e0b',
   'درآمد ثابت': '#10b981',
 }
