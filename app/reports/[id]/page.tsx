@@ -118,7 +118,7 @@ export default function SessionReportPage() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8" dir="rtl">
       <div className="max-w-5xl mx-auto" ref={contentRef}>
-        <Link href="/reports" className="text-xs text-slate-400 hover:text-slate-600 mb-4 inline-block">
+        <Link href="/reports" className="text-xs text-slate-400 hover:text-slate-600 mb-4 inline-block print:hidden">
           ← بازگشت به فهرست گزارش‌ها
         </Link>
 
@@ -146,7 +146,7 @@ export default function SessionReportPage() {
                 <p className="text-2xl font-bold text-slate-900">{participantCount}</p>
                 <p className="text-[11px] text-slate-400">شرکت‌کننده</p>
               </div>
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 print:hidden">
                 <button
                   onClick={() => handlePrint()}
                   className="text-xs font-medium bg-slate-900 text-white px-3.5 py-1.5 rounded-md hover:bg-slate-800 transition"
@@ -163,7 +163,7 @@ export default function SessionReportPage() {
             </div>
           </div>
           {lastUpdated && (
-            <p className="text-[11px] text-slate-400 mt-3">
+            <p className="text-[11px] text-slate-400 mt-3 print:hidden">
               آخرین بروزرسانی: {lastUpdated.toLocaleTimeString('fa-IR')}
             </p>
           )}
@@ -231,7 +231,7 @@ function SmartSummary({
   if (items.length === 0) return null
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden break-inside-avoid">
       <div className="px-5 py-3 border-b border-slate-100">
         <p className="text-xs font-bold text-slate-900">خلاصه‌ی جلسه</p>
       </div>
@@ -251,7 +251,7 @@ function QuestionCard({ question, rawAnswers }: { question: Question; rawAnswers
   const total = rawAnswers.length
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg p-5">
+    <div className="bg-white border border-slate-200 rounded-lg p-5 break-inside-avoid">
       <div className="flex items-start justify-between gap-3 mb-4">
         <h3 className="text-sm font-semibold text-slate-800 leading-relaxed">
           {question.question_text}
@@ -310,7 +310,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
         </ResponsiveContainer>
 
         <div className="flex-1 space-y-2">
-          {data
+          {[...data]
             .sort((a, b) => b.value - a.value)
             .map((d, i) => {
               const pct = answers.length > 0 ? Math.round((d.value / answers.length) * 100) : 0
@@ -390,7 +390,7 @@ function MultiChart({ answers }: { answers: string[][] }) {
           type="category"
           dataKey="name"
           width={130}
-          tickMargin={80}
+          tickMargin={8}
           tick={<WrappedYAxisTick />}
           interval={0}
           axisLine={{ stroke: '#e2e8f0' }}
