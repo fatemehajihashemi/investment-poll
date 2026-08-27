@@ -394,7 +394,7 @@ if (done) {
 {q.question_type === 'allocation' && (
             <div>
               {(() => {
-                const colors = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6']
+                const colors = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4']
                 const current = answers[q.id] || {}
                 const sum = q.options.reduce(
                   (acc: number, label: string) => acc + Number(current[label] || 0),
