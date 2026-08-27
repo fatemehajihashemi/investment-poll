@@ -29,10 +29,91 @@ const COLOR_BY_NAME: Record<string, string> = {
   'سهام': '#2563eb',
   'طلا': '#f59e0b',
   'درآمد ثابت': '#10b981',
+  'گواهی سپرده کالایی': '#10b981',
+  'کاورد کال': '#8b5cf6',
 }
 function getColor(name: string, index: number) {
   return COLOR_BY_NAME[name] || CHART_COLORS[(index + 3) % CHART_COLORS.length]
 }
+
+// --- تشخیص خودکار ساختار سوالات (کوتاه‌مدت / بلندمدت / سایر) ---
+// بدون وابستگی به شماره‌ی ثابت سوال، تا با تغییر بعدی سوالات یا گزارش‌های قدیمی خراب نشه.
+function sameOptionSet(a: string[], b: string[]) {
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x) => b.includes(x))
+}
+
+type Structure = {
+  winnerQ: Question | null
+  shortTermAllocationQ: Question | null
+  longTermAllocationQ: Question | null
+  sliderQs: Question[]
+  riskQ: Question | null
+  shortTermQs: Question[]
+  longTermQs: Question[]
+  otherQs: Question[]
+}
+
+function analyzeStructure(questions: Question[]): Structure {
+  const allocationQs = questions.filter((q) => q.question_type === 'allocation')
+  const singleQs = questions.filter((q) => q.question_type === 'single')
+
+  let winnerQ: Question | null = null
+  let longTermAllocationQ: Question | null = null
+  let shortTermAllocationQ: Question | null = null
+
+  for (const candidate of singleQs) {
+    const assets: string[] = candidate.options
+    const matching = allocationQs.filter((aq) => sameOptionSet(aq.options, assets))
+    const after = matching
+      .filter((aq) => aq.order_num > candidate.order_num)
+      .sort((a, b) => a.order_num - b.order_num)[0]
+    const before = matching
+      .filter((aq) => aq.order_num < candidate.order_num)
+      .sort((a, b) => b.order_num - a.order_num)[0]
+    if (after) {
+      winnerQ = candidate
+      longTermAllocationQ = after
+      shortTermAllocationQ = before || null
+      break
+    }
+  }
+
+  const sliderQs =
+    winnerQ && longTermAllocationQ
+      ? questions.filter(
+          (q) =>
+            q.question_type === 'slider' &&
+            q.order_num > (winnerQ as Question).order_num &&
+            q.order_num < (longTermAllocationQ as Question).order_num
+        )
+      : []
+
+  const riskQ = questions.find((q) => q.question_type === 'multi' && q.question_text.includes('ریسک')) || null
+
+  const shortTermMultiQ = shortTermAllocationQ
+    ? questions.find(
+        (q) =>
+          q.question_type === 'multi' &&
+          q.order_num < (shortTermAllocationQ as Question).order_num &&
+          Array.isArray(q.options) &&
+          q.options.some((o: string) => o.includes('وزن'))
+      ) || null
+    : null
+
+  const shortTermIds = new Set([shortTermMultiQ?.id, shortTermAllocationQ?.id].filter(Boolean) as string[])
+  const longTermIds = new Set(
+    [winnerQ?.id, longTermAllocationQ?.id, ...sliderQs.map((q) => q.id)].filter(Boolean) as string[]
+  )
+
+  const shortTermQs = questions.filter((q) => shortTermIds.has(q.id)).sort((a, b) => a.order_num - b.order_num)
+  const longTermQs = questions.filter((q) => longTermIds.has(q.id)).sort((a, b) => a.order_num - b.order_num)
+  const otherQs = questions
+    .filter((q) => !shortTermIds.has(q.id) && !longTermIds.has(q.id))
+    .sort((a, b) => a.order_num - b.order_num)
+
+  return { winnerQ, shortTermAllocationQ, longTermAllocationQ, sliderQs, riskQ, shortTermQs, longTermQs, otherQs }
+}
+// --- پایان تشخیص ساختار ---
 
 export default function SessionReportPage() {
   const params = useParams()
@@ -114,6 +195,7 @@ export default function SessionReportPage() {
   }
 
   const isActive = new Date(session.expires_at).getTime() > Date.now()
+  const structure = analyzeStructure(questions)
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8" dir="rtl">
@@ -171,11 +253,42 @@ export default function SessionReportPage() {
 
         <SmartSummary questions={questions} getResponsesFor={getResponsesFor} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-6">
-          {questions.map((q) => (
-            <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
-          ))}
-        </div>
+        {structure.shortTermQs.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">
+              چشم‌انداز کوتاه‌مدت (۲ هفته آینده)
+            </h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {structure.shortTermQs.map((q) => (
+                <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {structure.longTermQs.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">
+              چشم‌انداز بلندمدت (تا پایان سال ۱۴۰۵)
+            </h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {structure.longTermQs.map((q) => (
+                <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {structure.otherQs.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">سایر سوالات</h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {structure.otherQs.map((q) => (
+                <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   )
@@ -188,38 +301,46 @@ function SmartSummary({
   questions: Question[]
   getResponsesFor: (id: string) => any[]
 }) {
-  const singleQ = questions.find((q) => q.question_type === 'single' && q.order_num === 1)
-  const allocationQ = questions.find((q) => q.question_type === 'allocation')
-  const riskQ = questions.find((q) => q.question_type === 'multi' && q.order_num === 6)
-
+  const structure = analyzeStructure(questions)
   const items: { label: string; value: string }[] = []
 
-  if (singleQ) {
-    const answers = getResponsesFor(singleQ.id) as string[]
+  const shortTermStrategyQ = structure.shortTermQs.find((q) => q.question_type === 'multi')
+  if (shortTermStrategyQ) {
+    const answers = getResponsesFor(shortTermStrategyQ.id) as string[][]
+    if (answers.length > 0) {
+      const counts: Record<string, number> = {}
+      answers.forEach((arr) => arr.forEach((opt) => (counts[opt] = (counts[opt] || 0) + 1)))
+      const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+      if (top) items.push({ label: 'استراتژی غالب کوتاه‌مدت (۲ هفته)', value: top[0] })
+    }
+  }
+
+  if (structure.winnerQ) {
+    const answers = getResponsesFor(structure.winnerQ.id) as string[]
     if (answers.length > 0) {
       const counts: Record<string, number> = {}
       answers.forEach((a) => (counts[a] = (counts[a] || 0) + 1))
       const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
       const percent = Math.round((winner[1] / answers.length) * 100)
-      items.push({ label: 'بازار برنده از نظر کمیته', value: `${winner[0]} (${percent}٪)` })
+      items.push({ label: 'دارایی برنده از نظر کمیته (بلندمدت)', value: `${winner[0]} (${percent}٪)` })
     }
   }
 
-  if (allocationQ) {
-    const answers = getResponsesFor(allocationQ.id) as Record<string, number>[]
+  if (structure.longTermAllocationQ) {
+    const answers = getResponsesFor(structure.longTermAllocationQ.id) as Record<string, number>[]
     if (answers.length > 0) {
-      const avgData = (allocationQ.options as string[]).map((label) => {
+      const avgData = (structure.longTermAllocationQ.options as string[]).map((label) => {
         const values = answers.map((a) => Number(a[label] || 0))
         const avg = values.reduce((a, b) => a + b, 0) / values.length
         return { label, avg: Math.round(avg) }
       })
       const top = avgData.sort((a, b) => b.avg - a.avg)[0]
-      items.push({ label: 'تخصیص پیشنهادی غالب', value: `${top.label} — ${top.avg}٪` })
+      items.push({ label: 'تخصیص پیشنهادی غالب (بلندمدت)', value: `${top.label} — ${top.avg}٪` })
     }
   }
 
-  if (riskQ) {
-    const answers = getResponsesFor(riskQ.id) as string[][]
+  if (structure.riskQ) {
+    const answers = getResponsesFor(structure.riskQ.id) as string[][]
     if (answers.length > 0) {
       const counts: Record<string, number> = {}
       answers.forEach((arr) => arr.forEach((opt) => (counts[opt] = (counts[opt] || 0) + 1)))
@@ -235,7 +356,7 @@ function SmartSummary({
       <div className="px-5 py-3 border-b border-slate-100">
         <p className="text-xs font-bold text-slate-900">خلاصه‌ی جلسه</p>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-100">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-100">
         {items.map((item, i) => (
           <div key={i} className="px-5 py-4">
             <p className="text-[11px] text-slate-400 mb-1">{item.label}</p>

@@ -13,6 +13,103 @@ type Question = {
   max_select: number
 }
 
+// --- منطق تشخیص خودکار زنجیره‌ی «برنده / بازدهی‌ها / تخصیص نهایی» ---
+// این تابع بدون وابستگی به شماره‌ی ثابت سوال، خودش تشخیص می‌ده کدوم سوال «برنده»،
+// کدوم سوال‌های بازه‌ای مربوط به هر دارایی، و کدوم سوال «تخصیص بلندمدت» هستن.
+type ConsistencyBlock = {
+  winnerQ: Question
+  longTermAllocationQ: Question
+  sliderMap: Record<string, Question> // اسم دارایی -> سوال بازه‌ایِ همون دارایی
+}
+
+function sameOptionSet(a: string[], b: string[]) {
+  return a.length === b.length && a.every((x) => b.includes(x))
+}
+
+function getConsistencyBlock(questions: Question[]): ConsistencyBlock | null {
+  const allocationQs = questions.filter((q) => q.question_type === 'allocation')
+  const singleQs = questions.filter((q) => q.question_type === 'single')
+
+  for (const winnerQ of singleQs) {
+    const winnerAssets: string[] = winnerQ.options
+    if (!Array.isArray(winnerAssets) || winnerAssets.length === 0) continue
+
+    // سوال‌های تخصیصی که دقیقاً همون گزینه‌های سوال برنده رو دارن
+    const matchingAllocations = allocationQs.filter((aq) => sameOptionSet(aq.options, winnerAssets))
+
+    // سوال «تخصیص بلندمدت» همونیه که بعد از سوال برنده میاد (نه قبلش)
+    const longTermAllocationQ = matchingAllocations
+      .filter((aq) => aq.order_num > winnerQ.order_num)
+      .sort((a, b) => a.order_num - b.order_num)[0]
+
+    if (!longTermAllocationQ) continue
+
+    // سوال‌های بازه‌ای که بین سوال برنده و سوال تخصیص بلندمدت قرار دارن
+    const sliderQsInRange = questions.filter(
+      (q) =>
+        q.question_type === 'slider' &&
+        q.order_num > winnerQ.order_num &&
+        q.order_num < longTermAllocationQ.order_num
+    )
+
+    const sliderMap: Record<string, Question> = {}
+    winnerAssets.forEach((asset) => {
+      const match = sliderQsInRange.find((sq) => sq.question_text.includes(asset))
+      if (match) sliderMap[asset] = match
+    })
+
+    // فقط وقتی معتبره که برای هر دارایی، دقیقاً یه سوال بازه‌ای پیدا شده باشه
+    if (Object.keys(sliderMap).length === winnerAssets.length) {
+      return { winnerQ, longTermAllocationQ, sliderMap }
+    }
+  }
+
+  return null
+}
+
+function checkConsistency(block: ConsistencyBlock, answers: Record<string, any>): string | null {
+  const winnerAsset: string | undefined = answers[block.winnerQ.id]
+  if (!winnerAsset) return null
+
+  // ۱. بررسی: دارایی برنده باید بالاترین بازده مورد انتظار رو داشته باشه
+  const sliderEntries = Object.entries(block.sliderMap).map(([asset, sq]) => ({
+    asset,
+    value: Number(answers[sq.id] ?? 0),
+  }))
+
+  if (sliderEntries.length > 0) {
+    const maxSliderValue = Math.max(...sliderEntries.map((e) => e.value))
+    const topSliderAssets = sliderEntries.filter((e) => e.value === maxSliderValue).map((e) => e.asset)
+
+    if (!topSliderAssets.includes(winnerAsset)) {
+      return `شما «${winnerAsset}» را در سوال دارایی برنده انتخاب کرده‌اید، اما بالاترین بازده مورد انتظار را به «${topSliderAssets.join(
+        ' یا '
+      )}» داده‌اید. لطفاً با دکمه‌ی «قبلی» پاسخ‌ها را هماهنگ کنید.`
+    }
+  }
+
+  // ۲. بررسی: دارایی برنده باید بیشترین درصد تخصیص در پرتفوی نهایی را داشته باشه
+  const allocationAnswer: Record<string, number> = answers[block.longTermAllocationQ.id] || {}
+  const allocationEntries = Object.entries(allocationAnswer).map(([asset, value]) => ({
+    asset,
+    value: Number(value || 0),
+  }))
+
+  if (allocationEntries.length > 0) {
+    const maxAllocValue = Math.max(...allocationEntries.map((e) => e.value))
+    const topAllocAssets = allocationEntries.filter((e) => e.value === maxAllocValue).map((e) => e.asset)
+
+    if (!topAllocAssets.includes(winnerAsset)) {
+      return `شما «${winnerAsset}» را به‌عنوان دارایی برنده انتخاب کرده‌اید، اما در تخصیص پرتفوی نهایی، بیشترین درصد را به «${topAllocAssets.join(
+        ' یا '
+      )}» اختصاص داده‌اید. لطفاً درصد «${winnerAsset}» را بیشترین مقدار قرار دهید.`
+    }
+  }
+
+  return null
+}
+// --- پایان منطق اعتبارسنجی ---
+
 export default function QuestionsPage() {
   const router = useRouter()
   const [questions, setQuestions] = useState<Question[]>([])
@@ -61,6 +158,8 @@ export default function QuestionsPage() {
     loadQuestions()
   }, [])
 
+  const consistencyBlock = questions.length > 0 ? getConsistencyBlock(questions) : null
+
   function setAnswer(questionId: string, value: any) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
   }
@@ -83,6 +182,15 @@ export default function QuestionsPage() {
       setError('لطفاً قبل از ادامه، به این سوال پاسخ دهید.')
       return
     }
+
+    if (consistencyBlock && q.id === consistencyBlock.longTermAllocationQ.id) {
+      const consistencyError = checkConsistency(consistencyBlock, answers)
+      if (consistencyError) {
+        setError(consistencyError)
+        return
+      }
+    }
+
     setError('')
 
     if (current < questions.length - 1) {
@@ -286,7 +394,7 @@ if (done) {
 {q.question_type === 'allocation' && (
             <div>
               {(() => {
-                const colors = ['#2563eb', '#f59e0b', '#10b981']
+                const colors = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6']
                 const current = answers[q.id] || {}
                 const sum = q.options.reduce(
                   (acc: number, label: string) => acc + Number(current[label] || 0),
