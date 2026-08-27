@@ -33,7 +33,10 @@ export default function NewSessionPage() {
   useEffect(() => {
     async function load() {
       const { data: teamData } = await supabase.from('teams').select('id, name')
-      const { data: qsData } = await supabase.from('question_sets').select('id, title')
+      const { data: qsData } = await supabase
+        .from('question_sets')
+        .select('id, title')
+        .order('created_at', { ascending: false })
       setTeams(teamData || [])
       setQuestionSets(qsData || [])
       if (teamData && teamData.length > 0) setTeamId(teamData[0].id)
