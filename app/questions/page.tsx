@@ -15,6 +15,21 @@ type Question = {
   max_select: number
 }
 
+// --- رنگ‌بندی دارایی‌محور (هماهنگ با گزارش) ---
+const ASSET_COLOR_MAP: Record<string, string> = {
+  'بورس': '#2563eb',
+  'سهام': '#2563eb',
+  'طلا': '#f59e0b',
+  'درآمد ثابت': '#06b6d4',
+  'گواهی سپرده کالایی': '#10b981',
+  'کاورد کال': '#8b5cf6',
+}
+const FALLBACK_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4']
+function getAssetColor(name: string, index: number) {
+  return ASSET_COLOR_MAP[name] || FALLBACK_COLORS[index % FALLBACK_COLORS.length]
+}
+// --- پایان رنگ‌بندی ---
+
 // --- منطق تشخیص خودکار زنجیره‌ی «برنده / بازدهی‌ها / تخصیص نهایی» ---
 // این تابع بدون وابستگی به شماره‌ی ثابت سوال، خودش تشخیص می‌ده کدوم سوال «برنده»،
 // کدوم سوال «بازدهی‌های ادغام‌شده» (slider_group)، و کدوم سوال «تخصیص بلندمدت» هستن.
@@ -57,40 +72,43 @@ function getConsistencyBlock(questions: Question[]): ConsistencyBlock | null {
   return null
 }
 
-function checkConsistency(block: ConsistencyBlock, answers: Record<string, any>): string | null {
+// بررسی جداگانه: بلافاصله بعد از سوال «بازدهی‌ها» صدا زده می‌شه
+function checkReturnsConsistency(block: ConsistencyBlock, answers: Record<string, any>): string | null {
   const winnerAsset: string | undefined = answers[block.winnerQ.id]
   if (!winnerAsset) return null
 
-  // ۱. بررسی: دارایی برنده باید بالاترین بازده مورد انتظار رو داشته باشه
   const returnsAnswer: Record<string, number> = answers[block.returnsQ.id] || {}
-  const returnEntries = Object.entries(returnsAnswer)
+  const entries = Object.entries(returnsAnswer)
+  if (entries.length === 0) return null
 
-  if (returnEntries.length > 0) {
-    const maxReturnValue = Math.max(...returnEntries.map(([, v]) => Number(v)))
-    const topReturnAssets = returnEntries.filter(([, v]) => Number(v) === maxReturnValue).map(([k]) => k)
+  const maxVal = Math.max(...entries.map(([, v]) => Number(v)))
+  const topAssets = entries.filter(([, v]) => Number(v) === maxVal).map(([k]) => k)
 
-    if (!topReturnAssets.includes(winnerAsset)) {
-      return `شما «${winnerAsset}» را در سوال دارایی برنده انتخاب کرده‌اید، اما بالاترین بازده مورد انتظار را به «${topReturnAssets.join(
-        ' یا '
-      )}» داده‌اید. لطفاً با دکمه‌ی «قبلی» پاسخ‌ها را هماهنگ کنید.`
-    }
+  if (!topAssets.includes(winnerAsset)) {
+    return `شما «${winnerAsset}» را در سوال قبل به‌عنوان دارایی برنده انتخاب کرده‌اید، اما در همین سوال، بالاترین بازده مورد انتظار را به «${topAssets.join(
+      ' یا '
+    )}» داده‌اید. لطفاً پاسخ‌ها را هماهنگ کنید.`
   }
+  return null
+}
 
-  // ۲. بررسی: دارایی برنده باید بیشترین درصد تخصیص در پرتفوی نهایی را داشته باشه
+// بررسی جداگانه: بلافاصله بعد از سوال «تخصیص نهایی» صدا زده می‌شه
+function checkAllocationConsistency(block: ConsistencyBlock, answers: Record<string, any>): string | null {
+  const winnerAsset: string | undefined = answers[block.winnerQ.id]
+  if (!winnerAsset) return null
+
   const allocationAnswer: Record<string, number> = answers[block.longTermAllocationQ.id] || {}
-  const allocationEntries = Object.entries(allocationAnswer)
+  const entries = Object.entries(allocationAnswer)
+  if (entries.length === 0) return null
 
-  if (allocationEntries.length > 0) {
-    const maxAllocValue = Math.max(...allocationEntries.map(([, v]) => Number(v)))
-    const topAllocAssets = allocationEntries.filter(([, v]) => Number(v) === maxAllocValue).map(([k]) => k)
+  const maxVal = Math.max(...entries.map(([, v]) => Number(v)))
+  const topAssets = entries.filter(([, v]) => Number(v) === maxVal).map(([k]) => k)
 
-    if (!topAllocAssets.includes(winnerAsset)) {
-      return `شما «${winnerAsset}» را به‌عنوان دارایی برنده انتخاب کرده‌اید، اما در تخصیص پرتفوی نهایی، بیشترین درصد را به «${topAllocAssets.join(
-        ' یا '
-      )}» اختصاص داده‌اید. لطفاً درصد «${winnerAsset}» را بیشترین مقدار قرار دهید.`
-    }
+  if (!topAssets.includes(winnerAsset)) {
+    return `شما «${winnerAsset}» را به‌عنوان دارایی برنده انتخاب کرده‌اید، اما در همین سوال، بیشترین درصد تخصیص را به «${topAssets.join(
+      ' یا '
+    )}» داده‌اید. لطفاً درصد «${winnerAsset}» را بیشترین مقدار قرار دهید.`
   }
-
   return null
 }
 // --- پایان منطق اعتبارسنجی ---
@@ -180,10 +198,18 @@ export default function QuestionsPage() {
       return
     }
 
+    if (consistencyBlock && q.id === consistencyBlock.returnsQ.id) {
+      const returnsError = checkReturnsConsistency(consistencyBlock, answers)
+      if (returnsError) {
+        setError(returnsError)
+        return
+      }
+    }
+
     if (consistencyBlock && q.id === consistencyBlock.longTermAllocationQ.id) {
-      const consistencyError = checkConsistency(consistencyBlock, answers)
-      if (consistencyError) {
-        setError(consistencyError)
+      const allocationError = checkAllocationConsistency(consistencyBlock, answers)
+      if (allocationError) {
+        setError(allocationError)
         return
       }
     }
@@ -390,15 +416,22 @@ if (done) {
 
           {q.question_type === 'slider_group' && (
             <div className="space-y-5">
-              {(q.options.assets as SliderAsset[]).map((asset) => {
+              {(q.options.assets as SliderAsset[]).map((asset, i) => {
                 const current = answers[q.id] || {}
                 const val = current[asset.name] ?? asset.min
                 const percent = ((val - asset.min) / (asset.max - asset.min)) * 100
+                const color = getAssetColor(asset.name, i)
                 return (
                   <div key={asset.name}>
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-medium text-gray-700">{asset.name}</span>
-                      <span className="text-sm font-bold text-blue-700">
+                      <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full inline-block"
+                          style={{ backgroundColor: color }}
+                        />
+                        {asset.name}
+                      </span>
+                      <span className="text-sm font-bold" style={{ color }}>
                         {val}
                         {q.options.unit}
                       </span>
@@ -413,9 +446,9 @@ if (done) {
                         onChange={(e) =>
                           setAnswer(q.id, { ...current, [asset.name]: Number(e.target.value) })
                         }
-                        className="w-full h-2 rounded-full appearance-none cursor-pointer accent-blue-600"
+                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
                         style={{
-                          background: `linear-gradient(to right, #2563eb ${percent}%, #e5e7eb ${percent}%)`,
+                          background: `linear-gradient(to right, ${color} ${percent}%, #e5e7eb ${percent}%)`,
                         }}
                       />
                       <div className="flex justify-between mt-1 text-[11px] text-gray-400">
@@ -438,7 +471,6 @@ if (done) {
 {q.question_type === 'allocation' && (
             <div>
               {(() => {
-                const colors = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4']
                 const current = answers[q.id] || {}
                 const sum = q.options.reduce(
                   (acc: number, label: string) => acc + Number(current[label] || 0),
@@ -460,7 +492,7 @@ if (done) {
                           <div
                             key={label}
                             className="h-full transition-all duration-300 flex items-center justify-center text-xs text-white font-medium"
-                            style={{ width: `${width}%`, backgroundColor: colors[i % colors.length] }}
+                            style={{ width: `${width}%`, backgroundColor: getAssetColor(label, i) }}
                           >
                             {val > 8 ? `${val}٪` : ''}
                           </div>
@@ -477,7 +509,7 @@ if (done) {
                             <div className="flex items-center gap-2">
                               <span
                                 className="w-3 h-3 rounded-full inline-block"
-                                style={{ backgroundColor: colors[i % colors.length] }}
+                                style={{ backgroundColor: getAssetColor(label, i) }}
                               />
                               <span className="text-sm">{label}</span>
                             </div>
