@@ -449,6 +449,7 @@ if (done) {
                         className="w-full h-2 rounded-full appearance-none cursor-pointer"
                         style={{
                           background: `linear-gradient(to right, ${color} ${percent}%, #e5e7eb ${percent}%)`,
+                          accentColor: color,
                         }}
                       />
                       <div className="flex justify-between mt-1 text-[11px] text-gray-400">
