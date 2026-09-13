@@ -664,7 +664,7 @@ function SliderGroupChart({
             axisLine={{ stroke: '#e2e8f0' }}
             tickLine={false}
           />
-          <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: number) => `${v}${options.unit}`} />
+          <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${v}${options.unit}`} />
           <Bar dataKey="value" radius={[0, 4, 4, 0]}>
             {data.map((entry, i) => (
               <Cell key={i} fill={getColor(entry.name, i)} />
