@@ -505,7 +505,6 @@ function WrappedYAxisTick({ x, y, payload }: any) {
           x={0}
           y={(i - (lines.length - 1) / 2) * 12}
           textAnchor="end"
-          direction="rtl"
           fill="#475569"
           fontSize={11}
         >
