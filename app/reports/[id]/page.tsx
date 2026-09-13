@@ -496,7 +496,7 @@ function wrapText(text: string, maxCharsPerLine: number): string[] {
 }
 
 function WrappedYAxisTick({ x, y, payload }: any) {
-  const lines = wrapText(payload.value, 16)
+  const lines = wrapText(payload.value, 12)
   return (
     <g transform={`translate(${x},${y})`}>
       {lines.map((line, i) => (
@@ -505,6 +505,7 @@ function WrappedYAxisTick({ x, y, payload }: any) {
           x={0}
           y={(i - (lines.length - 1) / 2) * 12}
           textAnchor="end"
+          direction="rtl"
           fill="#475569"
           fontSize={11}
         >
@@ -534,7 +535,7 @@ function MultiChart({ answers }: { answers: string[][] }) {
         <YAxis
           type="category"
           dataKey="name"
-          width={130}
+          width={150}
           tickMargin={8}
           tick={<WrappedYAxisTick />}
           interval={0}
