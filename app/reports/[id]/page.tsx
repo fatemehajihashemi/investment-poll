@@ -496,7 +496,7 @@ function wrapText(text: string, maxCharsPerLine: number): string[] {
 }
 
 function WrappedYAxisTick({ x, y, payload }: any) {
-  const lines = wrapText(payload.value, 12)
+  const lines = wrapText(payload.value, 18)
   return (
     <g transform={`translate(${x},${y})`}>
       {lines.map((line, i) => (
@@ -528,8 +528,8 @@ function MultiChart({ answers }: { answers: string[][] }) {
     .sort((a, b) => b.value - a.value)
 
   return (
-    <ResponsiveContainer width="100%" height={Math.max(200, data.length * 46)}>
-      <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }} barSize={16} barCategoryGap={8}>
+    <ResponsiveContainer width="100%" height={Math.max(220, data.length * 70)}>
+      <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }} barSize={16} barCategoryGap={16}>
         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
         <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
         <YAxis
