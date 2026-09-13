@@ -527,24 +527,26 @@ function MultiChart({ answers }: { answers: string[][] }) {
     .sort((a, b) => b.value - a.value)
 
   return (
-    <ResponsiveContainer width="100%" height={Math.max(220, data.length * 70)}>
-      <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }} barSize={16} barCategoryGap={16}>
-        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
-        <YAxis
-          type="category"
-          dataKey="name"
-          width={150}
-          tickMargin={8}
-          tick={<WrappedYAxisTick />}
-          interval={0}
-          axisLine={{ stroke: '#e2e8f0' }}
-          tickLine={false}
-        />
-        <Tooltip cursor={{ fill: '#f8fafc' }} />
-        <Bar dataKey="value" fill="#475569" radius={[0, 4, 4, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <div dir="ltr">
+      <ResponsiveContainer width="100%" height={Math.max(220, data.length * 70)}>
+        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }} barSize={16} barCategoryGap={16}>
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+          <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={150}
+            tickMargin={8}
+            tick={<WrappedYAxisTick />}
+            interval={0}
+            axisLine={{ stroke: '#e2e8f0' }}
+            tickLine={false}
+          />
+          <Tooltip cursor={{ fill: '#f8fafc' }} />
+          <Bar dataKey="value" fill="#475569" radius={[0, 4, 4, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 
@@ -650,28 +652,30 @@ function SliderGroupChart({
 
   return (
     <div>
-      <ResponsiveContainer width="100%" height={Math.max(180, data.length * 44)}>
-        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 30, top: 4, bottom: 4 }} barSize={18} barCategoryGap={10}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-          <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            width={130}
-            tickMargin={8}
-            tick={{ fontSize: 12, fill: '#475569' }}
-            interval={0}
-            axisLine={{ stroke: '#e2e8f0' }}
-            tickLine={false}
-          />
-          <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${v}${options.unit}`} />
-          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-            {data.map((entry, i) => (
-              <Cell key={i} fill={getColor(entry.name, i)} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      <div dir="ltr">
+        <ResponsiveContainer width="100%" height={Math.max(180, data.length * 44)}>
+          <BarChart data={data} layout="vertical" margin={{ left: 10, right: 30, top: 4, bottom: 4 }} barSize={18} barCategoryGap={10}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+            <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
+            <YAxis
+              type="category"
+              dataKey="name"
+              width={130}
+              tickMargin={8}
+              tick={{ fontSize: 12, fill: '#475569' }}
+              interval={0}
+              axisLine={{ stroke: '#e2e8f0' }}
+              tickLine={false}
+            />
+            <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${v}${options.unit}`} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+              {data.map((entry, i) => (
+                <Cell key={i} fill={getColor(entry.name, i)} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
       {top && (
         <p className="text-[11px] text-slate-400 mt-2 pt-3 border-t border-slate-100">
           بالاترین بازده مورد انتظار: <span className="font-semibold text-slate-700">{top.value}{options.unit}</span> برای «{top.name}»
