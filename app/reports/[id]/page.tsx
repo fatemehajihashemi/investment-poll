@@ -10,11 +10,13 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 
+type SliderAsset = { name: string; min: number; max: number; step: number }
+
 type Question = {
   id: string
   order_num: number
   question_text: string
-  question_type: 'single' | 'multi' | 'slider' | 'allocation'
+  question_type: 'single' | 'multi' | 'slider' | 'allocation' | 'slider_group'
   options: any
 }
 
@@ -38,6 +40,7 @@ function getColor(name: string, index: number) {
 
 // --- تشخیص خودکار ساختار سوالات (کوتاه‌مدت / بلندمدت / سایر) ---
 // بدون وابستگی به شماره‌ی ثابت سوال، تا با تغییر بعدی سوالات یا گزارش‌های قدیمی خراب نشه.
+// شامل پشتیبانی از هر دو فرمت: سوال‌های بازه‌ای جداگانه (گزارش‌های قدیمی) و سوال بازدهی ادغام‌شده (slider_group).
 function sameOptionSet(a: string[], b: string[]) {
   return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x) => b.includes(x))
 }
@@ -46,7 +49,8 @@ type Structure = {
   winnerQ: Question | null
   shortTermAllocationQ: Question | null
   longTermAllocationQ: Question | null
-  sliderQs: Question[]
+  sliderQs: Question[] // فرمت قدیمی: سوال‌های بازه‌ای جداگانه
+  returnsQ: Question | null // فرمت جدید: سوال بازدهی ادغام‌شده
   riskQ: Question | null
   shortTermQs: Question[]
   longTermQs: Question[]
@@ -56,10 +60,12 @@ type Structure = {
 function analyzeStructure(questions: Question[]): Structure {
   const allocationQs = questions.filter((q) => q.question_type === 'allocation')
   const singleQs = questions.filter((q) => q.question_type === 'single')
+  const sliderGroupQs = questions.filter((q) => q.question_type === 'slider_group')
 
   let winnerQ: Question | null = null
   let longTermAllocationQ: Question | null = null
   let shortTermAllocationQ: Question | null = null
+  let returnsQ: Question | null = null
 
   for (const candidate of singleQs) {
     const assets: string[] = candidate.options
@@ -74,10 +80,16 @@ function analyzeStructure(questions: Question[]): Structure {
       winnerQ = candidate
       longTermAllocationQ = after
       shortTermAllocationQ = before || null
+      returnsQ =
+        sliderGroupQs.find((sq) => {
+          const names = ((sq.options?.assets || []) as SliderAsset[]).map((a) => a.name)
+          return sameOptionSet(names, assets)
+        }) || null
       break
     }
   }
 
+  // فرمت قدیمی: سوال‌های بازه‌ای جداگانه بین سوال برنده و سوال تخصیص بلندمدت (برای گزارش‌های قدیمی‌تر)
   const sliderQs =
     winnerQ && longTermAllocationQ
       ? questions.filter(
@@ -102,7 +114,7 @@ function analyzeStructure(questions: Question[]): Structure {
 
   const shortTermIds = new Set([shortTermMultiQ?.id, shortTermAllocationQ?.id].filter(Boolean) as string[])
   const longTermIds = new Set(
-    [winnerQ?.id, longTermAllocationQ?.id, ...sliderQs.map((q) => q.id)].filter(Boolean) as string[]
+    [winnerQ?.id, longTermAllocationQ?.id, returnsQ?.id, ...sliderQs.map((q) => q.id)].filter(Boolean) as string[]
   )
 
   const shortTermQs = questions.filter((q) => shortTermIds.has(q.id)).sort((a, b) => a.order_num - b.order_num)
@@ -111,7 +123,17 @@ function analyzeStructure(questions: Question[]): Structure {
     .filter((q) => !shortTermIds.has(q.id) && !longTermIds.has(q.id))
     .sort((a, b) => a.order_num - b.order_num)
 
-  return { winnerQ, shortTermAllocationQ, longTermAllocationQ, sliderQs, riskQ, shortTermQs, longTermQs, otherQs }
+  return {
+    winnerQ,
+    shortTermAllocationQ,
+    longTermAllocationQ,
+    sliderQs,
+    returnsQ,
+    riskQ,
+    shortTermQs,
+    longTermQs,
+    otherQs,
+  }
 }
 // --- پایان تشخیص ساختار ---
 
@@ -390,6 +412,8 @@ function QuestionCard({ question, rawAnswers }: { question: Question; rawAnswers
         <MultiChart answers={rawAnswers} />
       ) : question.question_type === 'slider' ? (
         <SliderChart answers={rawAnswers} unit={question.options.unit} />
+      ) : question.question_type === 'slider_group' ? (
+        <SliderGroupChart options={question.options} answers={rawAnswers} />
       ) : question.question_type === 'allocation' ? (
         <AllocationChart options={question.options} answers={rawAnswers} />
       ) : null}
@@ -603,6 +627,56 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
           {consensusLabel} · انحراف {stdDev.toFixed(1)}{unit}
         </span>
       </div>
+    </div>
+  )
+}
+
+function SliderGroupChart({
+  options,
+  answers,
+}: {
+  options: { unit: string; assets: SliderAsset[] }
+  answers: Record<string, number>[]
+}) {
+  const data = options.assets
+    .map((asset) => {
+      const values = answers.map((a) => Number(a[asset.name] ?? 0))
+      const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0
+      return { name: asset.name, value: Math.round(avg * 10) / 10 }
+    })
+    .sort((a, b) => b.value - a.value)
+
+  const top = data[0]
+
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={Math.max(180, data.length * 44)}>
+        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 30, top: 4, bottom: 4 }} barSize={18} barCategoryGap={10}>
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+          <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={130}
+            tickMargin={8}
+            tick={{ fontSize: 12, fill: '#475569' }}
+            interval={0}
+            axisLine={{ stroke: '#e2e8f0' }}
+            tickLine={false}
+          />
+          <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: number) => `${v}${options.unit}`} />
+          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+            {data.map((entry, i) => (
+              <Cell key={i} fill={getColor(entry.name, i)} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      {top && (
+        <p className="text-[11px] text-slate-400 mt-2 pt-3 border-t border-slate-100">
+          بالاترین بازده مورد انتظار: <span className="font-semibold text-slate-700">{top.value}{options.unit}</span> برای «{top.name}»
+        </p>
+      )}
     </div>
   )
 }
