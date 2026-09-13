@@ -4,64 +4,54 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 
+type SliderAsset = { name: string; min: number; max: number; step: number }
+
 type Question = {
   id: string
   order_num: number
   question_text: string
-  question_type: 'single' | 'multi' | 'slider' | 'allocation'
+  question_type: 'single' | 'multi' | 'slider' | 'allocation' | 'slider_group'
   options: any
   max_select: number
 }
 
 // --- منطق تشخیص خودکار زنجیره‌ی «برنده / بازدهی‌ها / تخصیص نهایی» ---
 // این تابع بدون وابستگی به شماره‌ی ثابت سوال، خودش تشخیص می‌ده کدوم سوال «برنده»،
-// کدوم سوال‌های بازه‌ای مربوط به هر دارایی، و کدوم سوال «تخصیص بلندمدت» هستن.
+// کدوم سوال «بازدهی‌های ادغام‌شده» (slider_group)، و کدوم سوال «تخصیص بلندمدت» هستن.
 type ConsistencyBlock = {
   winnerQ: Question
   longTermAllocationQ: Question
-  sliderMap: Record<string, Question> // اسم دارایی -> سوال بازه‌ایِ همون دارایی
+  returnsQ: Question
 }
 
 function sameOptionSet(a: string[], b: string[]) {
-  return a.length === b.length && a.every((x) => b.includes(x))
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x) => b.includes(x))
 }
 
 function getConsistencyBlock(questions: Question[]): ConsistencyBlock | null {
   const allocationQs = questions.filter((q) => q.question_type === 'allocation')
   const singleQs = questions.filter((q) => q.question_type === 'single')
+  const sliderGroupQs = questions.filter((q) => q.question_type === 'slider_group')
 
   for (const winnerQ of singleQs) {
     const winnerAssets: string[] = winnerQ.options
     if (!Array.isArray(winnerAssets) || winnerAssets.length === 0) continue
 
-    // سوال‌های تخصیصی که دقیقاً همون گزینه‌های سوال برنده رو دارن
+    // سوال «تخصیص بلندمدت»: همون گزینه‌های سوال برنده رو داره و بعد از اون میاد
     const matchingAllocations = allocationQs.filter((aq) => sameOptionSet(aq.options, winnerAssets))
-
-    // سوال «تخصیص بلندمدت» همونیه که بعد از سوال برنده میاد (نه قبلش)
     const longTermAllocationQ = matchingAllocations
       .filter((aq) => aq.order_num > winnerQ.order_num)
       .sort((a, b) => a.order_num - b.order_num)[0]
-
     if (!longTermAllocationQ) continue
 
-    // سوال‌های بازه‌ای که بین سوال برنده و سوال تخصیص بلندمدت قرار دارن
-    const sliderQsInRange = questions.filter(
-      (q) =>
-        q.question_type === 'slider' &&
-        q.order_num > winnerQ.order_num &&
-        q.order_num < longTermAllocationQ.order_num
-    )
-
-    const sliderMap: Record<string, Question> = {}
-    winnerAssets.forEach((asset) => {
-      const match = sliderQsInRange.find((sq) => sq.question_text.includes(asset))
-      if (match) sliderMap[asset] = match
+    // سوال «بازدهی‌های ادغام‌شده»: دارایی‌هاش دقیقاً همون گزینه‌های سوال برنده هستن
+    const returnsQ = sliderGroupQs.find((sq) => {
+      const assetNames = ((sq.options?.assets || []) as SliderAsset[]).map((a) => a.name)
+      return sameOptionSet(assetNames, winnerAssets)
     })
+    if (!returnsQ) continue
 
-    // فقط وقتی معتبره که برای هر دارایی، دقیقاً یه سوال بازه‌ای پیدا شده باشه
-    if (Object.keys(sliderMap).length === winnerAssets.length) {
-      return { winnerQ, longTermAllocationQ, sliderMap }
-    }
+    return { winnerQ, longTermAllocationQ, returnsQ }
   }
 
   return null
@@ -72,17 +62,15 @@ function checkConsistency(block: ConsistencyBlock, answers: Record<string, any>)
   if (!winnerAsset) return null
 
   // ۱. بررسی: دارایی برنده باید بالاترین بازده مورد انتظار رو داشته باشه
-  const sliderEntries = Object.entries(block.sliderMap).map(([asset, sq]) => ({
-    asset,
-    value: Number(answers[sq.id] ?? 0),
-  }))
+  const returnsAnswer: Record<string, number> = answers[block.returnsQ.id] || {}
+  const returnEntries = Object.entries(returnsAnswer)
 
-  if (sliderEntries.length > 0) {
-    const maxSliderValue = Math.max(...sliderEntries.map((e) => e.value))
-    const topSliderAssets = sliderEntries.filter((e) => e.value === maxSliderValue).map((e) => e.asset)
+  if (returnEntries.length > 0) {
+    const maxReturnValue = Math.max(...returnEntries.map(([, v]) => Number(v)))
+    const topReturnAssets = returnEntries.filter(([, v]) => Number(v) === maxReturnValue).map(([k]) => k)
 
-    if (!topSliderAssets.includes(winnerAsset)) {
-      return `شما «${winnerAsset}» را در سوال دارایی برنده انتخاب کرده‌اید، اما بالاترین بازده مورد انتظار را به «${topSliderAssets.join(
+    if (!topReturnAssets.includes(winnerAsset)) {
+      return `شما «${winnerAsset}» را در سوال دارایی برنده انتخاب کرده‌اید، اما بالاترین بازده مورد انتظار را به «${topReturnAssets.join(
         ' یا '
       )}» داده‌اید. لطفاً با دکمه‌ی «قبلی» پاسخ‌ها را هماهنگ کنید.`
     }
@@ -90,14 +78,11 @@ function checkConsistency(block: ConsistencyBlock, answers: Record<string, any>)
 
   // ۲. بررسی: دارایی برنده باید بیشترین درصد تخصیص در پرتفوی نهایی را داشته باشه
   const allocationAnswer: Record<string, number> = answers[block.longTermAllocationQ.id] || {}
-  const allocationEntries = Object.entries(allocationAnswer).map(([asset, value]) => ({
-    asset,
-    value: Number(value || 0),
-  }))
+  const allocationEntries = Object.entries(allocationAnswer)
 
   if (allocationEntries.length > 0) {
-    const maxAllocValue = Math.max(...allocationEntries.map((e) => e.value))
-    const topAllocAssets = allocationEntries.filter((e) => e.value === maxAllocValue).map((e) => e.asset)
+    const maxAllocValue = Math.max(...allocationEntries.map(([, v]) => Number(v)))
+    const topAllocAssets = allocationEntries.filter(([, v]) => Number(v) === maxAllocValue).map(([k]) => k)
 
     if (!topAllocAssets.includes(winnerAsset)) {
       return `شما «${winnerAsset}» را به‌عنوان دارایی برنده انتخاب کرده‌اید، اما در تخصیص پرتفوی نهایی، بیشترین درصد را به «${topAllocAssets.join(
@@ -170,16 +155,28 @@ export default function QuestionsPage() {
     if (q.question_type === 'allocation') {
       if (!val) return false
       const sum = Object.values(val).reduce((a: number, b: any) => a + Number(b || 0), 0)
-      return sum === 100
+      const allMinTen = (q.options as string[]).every((label) => Number(val[label] || 0) >= 10)
+      return sum === 100 && allMinTen
     }
-    if (q.question_type === 'slider') return true
+    if (q.question_type === 'slider' || q.question_type === 'slider_group') return true
     return val !== undefined && val !== null && val !== ''
   }
 
   async function handleNext() {
     const q = questions[current]
     if (!isAnswered(q)) {
-      setError('لطفاً قبل از ادامه، به این سوال پاسخ دهید.')
+      if (q.question_type === 'allocation') {
+        const val = answers[q.id] || {}
+        const sum = Object.values(val).reduce((a: number, b: any) => a + Number(b || 0), 0)
+        const under = (q.options as string[]).filter((label) => Number(val[label] || 0) < 10)
+        if (sum === 100 && under.length > 0) {
+          setError(`سهم هر گزینه باید حداقل ۱۰٪ باشد. سهم «${under.join('، ')}» کمتر از ۱۰٪ است.`)
+        } else {
+          setError('لطفاً قبل از ادامه، به این سوال پاسخ دهید.')
+        }
+      } else {
+        setError('لطفاً قبل از ادامه، به این سوال پاسخ دهید.')
+      }
       return
     }
 
@@ -391,6 +388,53 @@ if (done) {
             </div>
           )}
 
+          {q.question_type === 'slider_group' && (
+            <div className="space-y-5">
+              {(q.options.assets as SliderAsset[]).map((asset) => {
+                const current = answers[q.id] || {}
+                const val = current[asset.name] ?? asset.min
+                const percent = ((val - asset.min) / (asset.max - asset.min)) * 100
+                return (
+                  <div key={asset.name}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sm font-medium text-gray-700">{asset.name}</span>
+                      <span className="text-sm font-bold text-blue-700">
+                        {val}
+                        {q.options.unit}
+                      </span>
+                    </div>
+                    <div dir="ltr">
+                      <input
+                        type="range"
+                        min={asset.min}
+                        max={asset.max}
+                        step={asset.step}
+                        value={val}
+                        onChange={(e) =>
+                          setAnswer(q.id, { ...current, [asset.name]: Number(e.target.value) })
+                        }
+                        className="w-full h-2 rounded-full appearance-none cursor-pointer accent-blue-600"
+                        style={{
+                          background: `linear-gradient(to right, #2563eb ${percent}%, #e5e7eb ${percent}%)`,
+                        }}
+                      />
+                      <div className="flex justify-between mt-1 text-[11px] text-gray-400">
+                        <span>
+                          {asset.min}
+                          {q.options.unit}
+                        </span>
+                        <span>
+                          {asset.max}
+                          {q.options.unit}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
 {q.question_type === 'allocation' && (
             <div>
               {(() => {
@@ -400,7 +444,10 @@ if (done) {
                   (acc: number, label: string) => acc + Number(current[label] || 0),
                   0
                 )
-                const isValid = sum === 100
+                const allMinTen = (q.options as string[]).every(
+                  (label) => Number(current[label] || 0) >= 10
+                )
+                const isValid = sum === 100 && allMinTen
 
                 return (
                   <>
@@ -423,35 +470,43 @@ if (done) {
 
                     {/* ورودی‌ها */}
                     <div className="space-y-3">
-                      {q.options.map((label: string, i: number) => (
-                        <div key={label} className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-3 h-3 rounded-full inline-block"
-                              style={{ backgroundColor: colors[i % colors.length] }}
-                            />
-                            <span className="text-sm">{label}</span>
+                      {q.options.map((label: string, i: number) => {
+                        const belowMin = Number(current[label] || 0) < 10
+                        return (
+                          <div key={label} className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-3 h-3 rounded-full inline-block"
+                                style={{ backgroundColor: colors[i % colors.length] }}
+                              />
+                              <span className="text-sm">{label}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={current[label] ?? ''}
+                                onChange={(e) =>
+                                  setAnswer(q.id, { ...current, [label]: Number(e.target.value) })
+                                }
+                                className={`w-20 border-2 rounded-xl px-2 py-1.5 text-center focus:outline-none ${
+                                  belowMin
+                                    ? 'border-amber-300 focus:border-amber-400'
+                                    : 'border-gray-200 focus:border-blue-500'
+                                }`}
+                              />
+                              <span className="text-xs text-gray-400">٪</span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              value={current[label] ?? ''}
-                              onChange={(e) =>
-                                setAnswer(q.id, { ...current, [label]: Number(e.target.value) })
-                              }
-                              className="w-20 border-2 border-gray-200 rounded-xl px-2 py-1.5 text-center focus:border-blue-500 focus:outline-none"
-                            />
-                            <span className="text-xs text-gray-400">٪</span>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
 
                     <p className={`text-xs mt-3 font-medium ${isValid ? 'text-green-600' : 'text-gray-400'}`}>
                       مجموع فعلی: {sum} از ۱۰۰ {isValid ? '✓' : ''}
                     </p>
+                    <p className="text-[11px] text-gray-400 mt-1">حداقل سهم هر گزینه باید ۱۰٪ باشد.</p>
                   </>
                 )
               })()}
