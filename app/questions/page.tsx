@@ -173,7 +173,7 @@ export default function QuestionsPage() {
     if (q.question_type === 'allocation') {
       if (!val) return false
       const sum = Object.values(val).reduce((a: number, b: any) => a + Number(b || 0), 0)
-      const allMinTen = (q.options as string[]).every((label) => Number(val[label] || 0) >= 10)
+      const allMinTen = (q.options as string[]).every((label) => Number(val[label] || 0) >= 5)
       return sum === 100 && allMinTen
     }
     if (q.question_type === 'slider' || q.question_type === 'slider_group') return true
@@ -186,9 +186,9 @@ export default function QuestionsPage() {
       if (q.question_type === 'allocation') {
         const val = answers[q.id] || {}
         const sum = Object.values(val).reduce((a: number, b: any) => a + Number(b || 0), 0)
-        const under = (q.options as string[]).filter((label) => Number(val[label] || 0) < 10)
+        const under = (q.options as string[]).filter((label) => Number(val[label] || 0) < 5)
         if (sum === 100 && under.length > 0) {
-          setError(`سهم هر گزینه باید حداقل ۱۰٪ باشد. سهم «${under.join('، ')}» کمتر از ۱۰٪ است.`)
+          setError(`سهم هر گزینه باید حداقل ۵٪ باشد. سهم «${under.join('، ')}» کمتر از ۵٪ است.`)
         } else {
           setError('لطفاً قبل از ادامه، به این سوال پاسخ دهید.')
         }
@@ -259,7 +259,7 @@ export default function QuestionsPage() {
       </div>
     )
   }
-  
+
 if (done) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4" dir="rtl">
@@ -478,7 +478,7 @@ if (done) {
                   0
                 )
                 const allMinTen = (q.options as string[]).every(
-                  (label) => Number(current[label] || 0) >= 10
+                  (label) => Number(current[label] || 0) >= 5
                 )
                 const isValid = sum === 100 && allMinTen
 
@@ -504,7 +504,7 @@ if (done) {
                     {/* ورودی‌ها */}
                     <div className="space-y-3">
                       {q.options.map((label: string, i: number) => {
-                        const belowMin = Number(current[label] || 0) < 10
+                        const belowMin = Number(current[label] || 0) < 5
                         return (
                           <div key={label} className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -539,7 +539,7 @@ if (done) {
                     <p className={`text-xs mt-3 font-medium ${isValid ? 'text-green-600' : 'text-gray-400'}`}>
                       مجموع فعلی: {sum} از ۱۰۰ {isValid ? '✓' : ''}
                     </p>
-                    <p className="text-[11px] text-gray-400 mt-1">حداقل سهم هر گزینه باید ۱۰٪ باشد.</p>
+                    <p className="text-[11px] text-gray-400 mt-1">حداقل سهم هر گزینه باید ۵٪ باشد.</p>
                   </>
                 )
               })()}
