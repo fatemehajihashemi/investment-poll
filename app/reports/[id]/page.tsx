@@ -157,55 +157,85 @@ export default function SessionReportPage() {
   const [notFound, setNotFound] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
+  // خطا در دریافت اطلاعات نباید بی‌صدا بماند: اگر دریافت شکست بخورد، نمودارها آخرین داده‌ی سالم را نگه می‌دارند
+  // ولی یک نوار هشدار نشان داده می‌شود تا کسی داده‌ی قدیمی را «نتیجه‌ی نهایی» تصور نکند.
+  const [fetchError, setFetchError] = useState(false)
+  const inFlight = useRef(false)
+
   const loadData = useCallback(async () => {
-    const { data: sessionData } = await supabase
-      .from('sessions')
-      .select('id, title, teams(name), question_set_id, expires_at, expected_participants')
-      .eq('id', sessionId)
-      .maybeSingle()
+    if (inFlight.current) return // اگر دریافت قبلی هنوز تمام نشده، دومی شروع نمی‌شود (جلوگیری از رونویسی داده‌ی جدید با قدیمی)
+    inFlight.current = true
+    try {
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('sessions')
+        .select('id, title, teams(name), question_set_id, expires_at, expected_participants')
+        .eq('id', sessionId)
+        .maybeSingle()
+      if (sessionError) throw sessionError
 
-    if (!sessionData) {
-      setNotFound(true)
+      if (!sessionData) {
+        setNotFound(true)
+        setLoading(false)
+        setFetchError(false)
+        return
+      }
+
+      const { data: questionData, error: questionError } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('question_set_id', sessionData.question_set_id)
+        .order('order_num', { ascending: true })
+      if (questionError) throw questionError
+
+      // هر درخواست Supabase حداکثر ۱۰۰۰ ردیف برمی‌گرداند؛ پاسخ‌ها را صفحه‌صفحه می‌خوانیم تا در جلسه‌های بزرگ چیزی جا نیفتد.
+      const PAGE = 1000
+      const allRows: ResponseRow[] = []
+      for (let from = 0; ; from += PAGE) {
+        const { data: chunk, error: responseError } = await supabase
+          .from('responses')
+          .select('question_id, answer, participant_id')
+          .eq('session_id', sessionData.id)
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (responseError) throw responseError
+        const rows = (chunk as ResponseRow[]) || []
+        allRows.push(...rows)
+        if (rows.length < PAGE) break
+      }
+
+      const { count, error: countError } = await supabase
+        .from('participants')
+        .select('*', { count: 'exact', head: true })
+        .eq('session_id', sessionData.id)
+      if (countError) throw countError
+
+      // اگر یک شرکت‌کننده به هر دلیل برای یک سوال بیش از یک پاسخ ثبت کرده باشد، فقط یکی شمرده می‌شود.
+      const seen = new Set<string>()
+      const uniqueResponses = allRows.filter((r) => {
+        if (!r.participant_id) return true
+        const key = `${r.participant_id}:${r.question_id}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+
+      // همه‌ی داده‌ها فقط وقتی با هم ثبت می‌شوند که هر چهار دریافت موفق بوده باشند (حالت نیمه‌به‌روز نداریم)
+      setSession(sessionData)
+      setQuestions((questionData as Question[]) || [])
+      // فقط وقتی داده واقعاً عوض شده state را عوض می‌کنیم تا نمودارها بی‌دلیل دوباره رسم نشوند
+      setResponses((prev) =>
+        JSON.stringify(prev) === JSON.stringify(uniqueResponses) ? prev : uniqueResponses
+      )
+      setJoinedCount(count || 0)
+      setLastUpdated(new Date())
+      setFetchError(false)
       setLoading(false)
-      return
+    } catch {
+      setFetchError(true)
+      setLoading(false)
+    } finally {
+      inFlight.current = false
     }
-    setSession(sessionData)
-
-    const { data: questionData } = await supabase
-      .from('questions')
-      .select('*')
-      .eq('question_set_id', sessionData.question_set_id)
-      .order('order_num', { ascending: true })
-
-    setQuestions((questionData as Question[]) || [])
-
-    const { data: responseData } = await supabase
-      .from('responses')
-      .select('question_id, answer, participant_id')
-      .eq('session_id', sessionData.id)
-
-    // اگر یک شرکت‌کننده به هر دلیل برای یک سوال بیش از یک پاسخ ثبت کرده باشد، فقط یکی شمرده می‌شود.
-    const seen = new Set<string>()
-    const uniqueResponses = ((responseData as ResponseRow[]) || []).filter((r) => {
-      if (!r.participant_id) return true
-      const key = `${r.participant_id}:${r.question_id}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    // فقط وقتی داده واقعاً عوض شده state را عوض می‌کنیم تا نمودارها بی‌دلیل دوباره رسم نشوند
-    setResponses((prev) =>
-      JSON.stringify(prev) === JSON.stringify(uniqueResponses) ? prev : uniqueResponses
-    )
-
-    const { count } = await supabase
-      .from('participants')
-      .select('*', { count: 'exact', head: true })
-      .eq('session_id', sessionData.id)
-
-    setJoinedCount(count || 0)
-    setLastUpdated(new Date())
-    setLoading(false)
   }, [sessionId])
 
   useEffect(() => {
@@ -222,6 +252,17 @@ export default function SessionReportPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50" dir="rtl">
         <p className="text-slate-400 text-sm">در حال بارگذاری داشبورد...</p>
+      </div>
+    )
+  }
+
+  if (!session && fetchError && !notFound) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-slate-50 px-4" dir="rtl">
+        <p className="text-red-600 text-sm">دریافت اطلاعات گزارش ممکن نشد. اتصال اینترنت را بررسی کنید؛ تلاش مجدد به‌صورت خودکار ادامه دارد.</p>
+        <button onClick={loadData} className="text-xs font-medium bg-slate-900 text-white px-3.5 py-1.5 rounded-md hover:bg-slate-800 transition">
+          تلاش مجدد
+        </button>
       </div>
     )
   }
@@ -246,6 +287,13 @@ export default function SessionReportPage() {
         <Link href="/reports" className="text-xs text-slate-400 hover:text-slate-600 mb-4 inline-block print:hidden">
           ← بازگشت به فهرست گزارش‌ها
         </Link>
+
+        {fetchError && (
+          <div role="alert" className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 print:hidden">
+            ارتباط با سرور برقرار نیست؛ اعداد زیر ممکن است قدیمی باشند
+            {lastUpdated ? ` (آخرین داده‌ی سالم: ${lastUpdated.toLocaleTimeString('fa-IR')})` : ''}. تلاش مجدد خودکار ادامه دارد.
+          </div>
+        )}
 
         <div className="border-b border-slate-200 pb-6 mb-8">
           <div className="flex flex-wrap items-start justify-between gap-4">

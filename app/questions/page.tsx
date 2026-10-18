@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
+import { fa } from '../lib/format'
 
 type SliderAsset = { name: string; min: number; max: number; step: number }
 
@@ -364,10 +365,10 @@ if (expired) {
         <div className="mb-4">
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs font-medium text-gray-500">
-              سوال {current + 1} از {questions.length}
+              سوال {fa(current + 1)} از {fa(questions.length)}
             </span>
             <span className="text-xs font-medium text-blue-600">
-              {Math.round(progressPercent)}٪
+              {fa(Math.round(progressPercent))}٪
             </span>
           </div>
           <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -413,7 +414,7 @@ if (expired) {
 
           {q.question_type === 'multi' && (
             <div className="space-y-2">
-              <p className="text-xs text-gray-400 mb-3">حداکثر {q.max_select} گزینه</p>
+              <p className="text-xs text-gray-400 mb-3">حداکثر {fa(q.max_select)} گزینه</p>
               {q.options.map((opt: string) => {
                 const selected: string[] = answers[q.id] || []
                 const checked = selected.includes(opt)
@@ -452,7 +453,7 @@ if (expired) {
                   <>
                     <div className="text-center mb-4">
                       <span className="inline-block bg-blue-50 text-blue-700 font-bold text-2xl px-5 py-2 rounded-2xl">
-                        {val}
+                        {fa(Number(val))}
                         {q.options.unit}
                       </span>
                     </div>
@@ -470,11 +471,11 @@ if (expired) {
                     />
                     <div className="flex justify-between mt-2 text-xs text-gray-400">
                       <span>
-                        {q.options.min}
+                        {fa(Number(q.options.min))}
                         {q.options.unit}
                       </span>
                       <span>
-                        {q.options.max}
+                        {fa(Number(q.options.max))}
                         {q.options.unit}
                       </span>
                     </div>
@@ -502,7 +503,7 @@ if (expired) {
                         {asset.name}
                       </span>
                       <span className="text-sm font-bold" style={{ color }}>
-                        {val}
+                        {fa(Number(val))}
                         {q.options.unit}
                       </span>
                     </div>
@@ -524,11 +525,11 @@ if (expired) {
                       />
                       <div className="flex justify-between mt-1 text-[11px] text-gray-400">
                         <span>
-                          {asset.min}
+                          {fa(Number(asset.min))}
                           {q.options.unit}
                         </span>
                         <span>
-                          {asset.max}
+                          {fa(Number(asset.max))}
                           {q.options.unit}
                         </span>
                       </div>
@@ -565,7 +566,7 @@ if (expired) {
                             className="h-full transition-all duration-300 flex items-center justify-center text-xs text-white font-medium"
                             style={{ width: `${width}%`, backgroundColor: getAssetColor(label, i) }}
                           >
-                            {val > 8 ? `${val}٪` : ''}
+                            {val > 8 ? `${fa(val)}٪` : ''}
                           </div>
                         )
                       })}
@@ -607,7 +608,7 @@ if (expired) {
                     </div>
 
                     <p className={`text-xs mt-3 font-medium ${isValid ? 'text-green-600' : 'text-gray-400'}`}>
-                      مجموع فعلی: {sum} از ۱۰۰ {isValid ? '✓' : ''}
+                      مجموع فعلی: {fa(Number(sum))} از ۱۰۰ {isValid ? '✓' : ''}
                     </p>
                     <p className="text-[11px] text-gray-400 mt-1">حداقل سهم هر گزینه باید ۵٪ باشد.</p>
                   </>
