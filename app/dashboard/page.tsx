@@ -3,6 +3,7 @@
 import { useReactToPrint } from 'react-to-print'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { getOptionColor } from '../lib/chartColors'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -21,9 +22,8 @@ type ResponseRow = {
   answer: any
 }
 
-// پالت رنگی محدود و حرفه‌ای: سرمه‌ای تیره به‌عنوان رنگ اصلی، طیفی از خاکستری/سرمه‌ای برای بقیه
-const NAVY = '#0f172a'
-const CHART_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4']
+// رنگ همه‌ی نمودارها فقط از یک منبع می‌آید (app/lib/chartColors.ts)؛ جزئیات قانون آنجاست.
+const getColor = getOptionColor
 
 export default function DashboardPage() {
   const contentRef = useRef<HTMLDivElement>(null)
@@ -253,13 +253,20 @@ function QuestionCard({ question, rawAnswers }: { question: Question; rawAnswers
 }
 
 function SingleChart({ options, answers }: { options: string[]; answers: string[] }) {
-  const data = options.map((opt) => ({
-    name: opt,
-    value: answers.filter((a) => a === opt).length,
-  }))
+  // رنگ هر گزینه یک‌بار و بر اساس جایگاه «اصلی» آن در فهرست گزینه‌ها تعیین می‌شود (قبل از مرتب‌سازی)،
+  // و همان رنگ هم برای برش نمودار و هم برای راهنما و tooltip استفاده می‌شود.
+  // ترتیب نمایش هم یکی است: از بیشترین به کمترین رای (مرتب‌سازی پایدار).
+  const data = options
+    .map((opt, i) => ({
+      name: opt,
+      value: answers.filter((a) => a === opt).length,
+      color: getColor(opt, i),
+    }))
+    .sort((a, b) => b.value - a.value)
 
-  const maxItem = data.reduce((a, b) => (b.value > a.value ? b : a), data[0])
+  const maxItem = data[0]
   const consensus = answers.length > 0 ? Math.round((maxItem.value / answers.length) * 100) : 0
+  const percentOf = (value: number) => (answers.length > 0 ? Math.round((value / answers.length) * 100) : 0)
 
   return (
     <div>
@@ -277,30 +284,24 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               stroke="#fff"
               strokeWidth={2}
             >
-              {data.map((_, i) => (
-                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+              {data.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip
+              formatter={(value: any, name: any) => [`${value} نفر (${percentOf(Number(value))}٪)`, name]}
+            />
           </PieChart>
         </ResponsiveContainer>
 
         <div className="flex-1 space-y-2">
-          {data
-            .sort((a, b) => b.value - a.value)
-            .map((d, i) => {
-              const pct = answers.length > 0 ? Math.round((d.value / answers.length) * 100) : 0
-              return (
-                <div key={d.name} className="flex items-center gap-2 text-xs">
-                  <span
-                    className="w-2.5 h-2.5 rounded-sm shrink-0"
-                    style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
-                  />
-                  <span className="text-slate-600 flex-1">{d.name}</span>
-                  <span className="font-semibold text-slate-900">{pct}٪</span>
-                </div>
-              )
-            })}
+          {data.map((d) => (
+            <div key={d.name} className="flex items-center gap-2 text-xs">
+              <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+              <span className="text-slate-600 flex-1">{d.name}</span>
+              <span className="font-semibold text-slate-900">{percentOf(d.value)}٪</span>
+            </div>
+          ))}
         </div>
       </div>
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
@@ -463,11 +464,15 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
 }
 
 function AllocationChart({ options, answers }: { options: string[]; answers: Record<string, number>[] }) {
-  const avgData = options.map((label, i) => {
-    const values = answers.map((a) => Number(a[label] || 0))
-    const avg = values.reduce((a, b) => a + b, 0) / values.length
-    return { name: label, value: Math.round(avg), color: CHART_COLORS[i % CHART_COLORS.length] }
-  })
+  // رنگ بر اساس جایگاه اصلی گزینه (قبل از مرتب‌سازی)؛ سپس از بیشترین به کمترین درصد مرتب می‌شود
+  // تا ترتیب راهنما و برش‌های نمودار با درصدها هماهنگ باشد (مرتب‌سازی پایدار).
+  const avgData = options
+    .map((label, i) => {
+      const values = answers.map((a) => Number(a[label] || 0))
+      const avg = values.reduce((a, b) => a + b, 0) / values.length
+      return { name: label, value: Math.round(avg), color: getColor(label, i) }
+    })
+    .sort((a, b) => b.value - a.value)
 
   return (
     <div>
@@ -485,11 +490,11 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
               stroke="#fff"
               strokeWidth={2}
             >
-              {avgData.map((entry, i) => (
-                <Cell key={i} fill={entry.color} />
+              {avgData.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip formatter={(value: any, name: any) => [`${value}٪`, name]} />
           </PieChart>
         </ResponsiveContainer>
         <div className="flex-1 space-y-2">

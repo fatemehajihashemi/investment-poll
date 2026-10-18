@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
+import { getOptionColor } from '../../lib/chartColors'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -25,18 +26,8 @@ type ResponseRow = {
   answer: any
 }
 
-const CHART_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4']
-const COLOR_BY_NAME: Record<string, string> = {
-  'بورس': '#2563eb',
-  'سهام': '#2563eb',
-  'طلا': '#f59e0b',
-  'درآمد ثابت': '#06b6d4',
-  'گواهی سپرده کالایی': '#10b981',
-  'کاورد کال': '#8b5cf6',
-}
-function getColor(name: string, index: number) {
-  return COLOR_BY_NAME[name] || CHART_COLORS[(index + 3) % CHART_COLORS.length]
-}
+// رنگ همه‌ی نمودارها فقط از یک منبع می‌آید (app/lib/chartColors.ts)؛ جزئیات قانون آنجاست.
+const getColor = getOptionColor
 
 // --- تشخیص خودکار ساختار سوالات (کوتاه‌مدت / بلندمدت / سایر) ---
 // بدون وابستگی به شماره‌ی ثابت سوال، تا با تغییر بعدی سوالات یا گزارش‌های قدیمی خراب نشه.
@@ -422,13 +413,20 @@ function QuestionCard({ question, rawAnswers }: { question: Question; rawAnswers
 }
 
 function SingleChart({ options, answers }: { options: string[]; answers: string[] }) {
-  const data = options.map((opt) => ({
-    name: opt,
-    value: answers.filter((a) => a === opt).length,
-  }))
+  // رنگ هر گزینه یک‌بار و بر اساس جایگاه «اصلی» آن در فهرست گزینه‌ها تعیین می‌شود (قبل از مرتب‌سازی)،
+  // و همان رنگ هم برای برش نمودار و هم برای راهنما و tooltip استفاده می‌شود.
+  // ترتیب نمایش هم یکی است: از بیشترین به کمترین رای (مرتب‌سازی پایدار؛ در تساوی، ترتیب اصلی گزینه‌ها حفظ می‌شود).
+  const data = options
+    .map((opt, i) => ({
+      name: opt,
+      value: answers.filter((a) => a === opt).length,
+      color: getColor(opt, i),
+    }))
+    .sort((a, b) => b.value - a.value)
 
-  const maxItem = data.reduce((a, b) => (b.value > a.value ? b : a), data[0])
+  const maxItem = data[0]
   const consensus = answers.length > 0 ? Math.round((maxItem.value / answers.length) * 100) : 0
+  const percentOf = (value: number) => (answers.length > 0 ? Math.round((value / answers.length) * 100) : 0)
 
   return (
     <div>
@@ -446,30 +444,24 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               stroke="#fff"
               strokeWidth={2}
             >
-              {data.map((entry, i) => (
-                <Cell key={i} fill={getColor(entry.name, i)} />
+              {data.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip
+              formatter={(value: any, name: any) => [`${value} نفر (${percentOf(Number(value))}٪)`, name]}
+            />
           </PieChart>
         </ResponsiveContainer>
 
         <div className="flex-1 space-y-2">
-          {[...data]
-            .sort((a, b) => b.value - a.value)
-            .map((d, i) => {
-              const pct = answers.length > 0 ? Math.round((d.value / answers.length) * 100) : 0
-              return (
-                <div key={d.name} className="flex items-center gap-2 text-xs">
-                  <span
-                    className="w-2.5 h-2.5 rounded-sm shrink-0"
-                    style={{ backgroundColor: getColor(d.name, i) }}
-                  />
-                  <span className="text-slate-600 flex-1">{d.name}</span>
-                  <span className="font-semibold text-slate-900">{pct}٪</span>
-                </div>
-              )
-            })}
+          {data.map((d) => (
+            <div key={d.name} className="flex items-center gap-2 text-xs">
+              <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
+              <span className="text-slate-600 flex-1">{d.name}</span>
+              <span className="font-semibold text-slate-900">{percentOf(d.value)}٪</span>
+            </div>
+          ))}
         </div>
       </div>
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
@@ -641,10 +633,11 @@ function SliderGroupChart({
   answers: Record<string, number>[]
 }) {
   const data = options.assets
-    .map((asset) => {
+    .map((asset, i) => {
       const values = answers.map((a) => Number(a[asset.name] ?? 0))
       const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0
-      return { name: asset.name, value: Math.round(avg * 10) / 10 }
+      // رنگ بر اساس جایگاه اصلی دارایی (قبل از مرتب‌سازی) تا با تغییر رتبه جابه‌جا نشود
+      return { name: asset.name, value: Math.round(avg * 10) / 10, color: getColor(asset.name, i) }
     })
     .sort((a, b) => b.value - a.value)
 
@@ -669,8 +662,8 @@ function SliderGroupChart({
             />
             <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${v}${options.unit}`} />
             <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-              {data.map((entry, i) => (
-                <Cell key={i} fill={getColor(entry.name, i)} />
+              {data.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
               ))}
             </Bar>
           </BarChart>
@@ -686,11 +679,15 @@ function SliderGroupChart({
 }
 
 function AllocationChart({ options, answers }: { options: string[]; answers: Record<string, number>[] }) {
-  const avgData = options.map((label, i) => {
-    const values = answers.map((a) => Number(a[label] || 0))
-    const avg = values.reduce((a, b) => a + b, 0) / values.length
-    return { name: label, value: Math.round(avg), color: getColor(label, i) }
-  })
+  // رنگ بر اساس جایگاه اصلی گزینه (قبل از مرتب‌سازی)؛ سپس از بیشترین به کمترین درصد مرتب می‌شود
+  // تا ترتیب راهنما و برش‌های نمودار با درصدها هماهنگ باشد (مرتب‌سازی پایدار: در تساوی، ترتیب اصلی حفظ می‌شود).
+  const avgData = options
+    .map((label, i) => {
+      const values = answers.map((a) => Number(a[label] || 0))
+      const avg = values.reduce((a, b) => a + b, 0) / values.length
+      return { name: label, value: Math.round(avg), color: getColor(label, i) }
+    })
+    .sort((a, b) => b.value - a.value)
 
   return (
     <div>
@@ -708,11 +705,11 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
               stroke="#fff"
               strokeWidth={2}
             >
-              {avgData.map((entry, i) => (
-                <Cell key={i} fill={entry.color} />
+              {avgData.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip formatter={(value: any, name: any) => [`${value}٪`, name]} />
           </PieChart>
         </ResponsiveContainer>
         <div className="flex-1 space-y-2">
