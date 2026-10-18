@@ -53,3 +53,43 @@ export function getOptionColor(label: string, optionIndex: number): string {
 
   return FALLBACK_COLORS[(optionIndex + 3) % FALLBACK_COLORS.length]
 }
+
+// ---------------------------------------------------------------------------
+// سوال‌های «ترتیبی» (مثل سطح ریسک: بسیار پایین ← بسیار بالا)
+// گزینه‌هایشان ترتیب طبیعی دارد، پس رنگ باید «میزان» را نشان دهد (روشن ← تیره، یک رنگ)
+// و نه رنگ‌های بی‌ربط یا قرمز/سبز که برای افراد کوررنگ قابل‌تشخیص نیست.
+// ترتیب نمایش هم همان ترتیب طبیعی است، نه ترتیب درصد.
+// ---------------------------------------------------------------------------
+export const ORDINAL_RAMP = ['#93c5fd', '#60a5fa', '#3b82f6', '#1d4ed8', '#1e3a8a']
+
+const ORDINAL_SCALES: string[][] = [
+  ['بسیار پایین', 'پایین', 'متوسط', 'بالا', 'بسیار بالا'],
+  ['بسیار کم', 'کم', 'متوسط', 'زیاد', 'بسیار زیاد'],
+  ['خیلی کم', 'کم', 'متوسط', 'زیاد', 'خیلی زیاد'],
+]
+
+function plain(text: string): string {
+  return normalize(text).trim()
+}
+
+/**
+ * اگر همه‌ی گزینه‌ها از یک مقیاس ترتیبی شناخته‌شده باشند، برای هر گزینه «سطح» (۰ تا ۴) برمی‌گرداند؛ وگرنه null.
+ */
+export function getOrdinalLevels(options: string[]): number[] | null {
+  if (!Array.isArray(options) || options.length < 2) return null
+  const norm = options.map((o) => plain(String(o)))
+  for (const scale of ORDINAL_SCALES) {
+    const scaleNorm = scale.map(plain)
+    if (norm.every((o) => scaleNorm.includes(o))) return norm.map((o) => scaleNorm.indexOf(o))
+  }
+  return null
+}
+
+/** رنگ متن روی یک رنگ زمینه (سفید روی تیره، تیره روی روشن) تا خوانا بماند. */
+export function textOn(hex: string): string {
+  const h = hex.replace('#', '')
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  return lum > 0.4 ? '#0f172a' : '#ffffff'
+}

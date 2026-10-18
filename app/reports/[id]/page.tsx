@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
-import { getOptionColor } from '../../lib/chartColors'
+import { getOptionColor, getOrdinalLevels, ORDINAL_RAMP, textOn } from '../../lib/chartColors'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -24,10 +24,25 @@ type Question = {
 type ResponseRow = {
   question_id: string
   answer: any
+  participant_id?: string | null
 }
 
 // رنگ همه‌ی نمودارها فقط از یک منبع می‌آید (app/lib/chartColors.ts)؛ جزئیات قانون آنجاست.
 const getColor = getOptionColor
+
+// درصد با «یک رقم اعشار» (۳۶٫۴٪)؛ عدد صحیح بدون .۰ نمایش داده می‌شود (۵۰٪).
+// عدد نمایش‌داده‌شده همان نتیجه‌ی محاسبه است، بدون دستکاری برای رسیدن به جمع ۱۰۰.
+const round1 = (n: number) => Math.round(n * 10) / 10
+const fmtPct = (n: number) => `${round1(n)}٪`
+
+// پاسخ‌های نامعتبر (null، نوع اشتباه) نباید گزارش را از کار بیندازند یا شمرده شوند.
+function isValidAnswer(type: Question['question_type'], a: any): boolean {
+  if (a === null || a === undefined) return false
+  if (type === 'single') return typeof a === 'string'
+  if (type === 'multi') return Array.isArray(a)
+  if (type === 'slider') return typeof a === 'number' && Number.isFinite(a)
+  return typeof a === 'object' && !Array.isArray(a) // slider_group, allocation
+}
 
 // --- تشخیص خودکار ساختار سوالات (کوتاه‌مدت / بلندمدت / سایر) ---
 // بدون وابستگی به شماره‌ی ثابت سوال، تا با تغییر بعدی سوالات یا گزارش‌های قدیمی خراب نشه.
@@ -166,10 +181,22 @@ export default function SessionReportPage() {
 
     const { data: responseData } = await supabase
       .from('responses')
-      .select('question_id, answer')
+      .select('question_id, answer, participant_id')
       .eq('session_id', sessionData.id)
 
-    setResponses((responseData as ResponseRow[]) || [])
+    // اگر یک شرکت‌کننده به هر دلیل برای یک سوال بیش از یک پاسخ ثبت کرده باشد، فقط یکی شمرده می‌شود.
+    const seen = new Set<string>()
+    const uniqueResponses = ((responseData as ResponseRow[]) || []).filter((r) => {
+      if (!r.participant_id) return true
+      const key = `${r.participant_id}:${r.question_id}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    // فقط وقتی داده واقعاً عوض شده state را عوض می‌کنیم تا نمودارها بی‌دلیل دوباره رسم نشوند
+    setResponses((prev) =>
+      JSON.stringify(prev) === JSON.stringify(uniqueResponses) ? prev : uniqueResponses
+    )
 
     const { count } = await supabase
       .from('participants')
@@ -271,7 +298,7 @@ export default function SessionReportPage() {
             <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">
               چشم‌انداز کوتاه‌مدت (۲ هفته آینده)
             </h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               {structure.shortTermQs.map((q) => (
                 <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
               ))}
@@ -284,7 +311,7 @@ export default function SessionReportPage() {
             <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">
               چشم‌انداز بلندمدت (تا پایان سال ۱۴۰۵)
             </h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               {structure.longTermQs.map((q) => (
                 <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
               ))}
@@ -295,7 +322,7 @@ export default function SessionReportPage() {
         {structure.otherQs.length > 0 && (
           <section className="mt-8">
             <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">سایر سوالات</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               {structure.otherQs.map((q) => (
                 <QuestionCard key={q.id} question={q} rawAnswers={getResponsesFor(q.id)} />
               ))}
@@ -305,6 +332,13 @@ export default function SessionReportPage() {
       </div>
     </div>
   )
+}
+
+// همه‌ی گزینه‌هایی که بیشترین مقدار را دارند (در تساوی، همه برمی‌گردند، نه فقط اولی)
+function topOf<T extends { count: number }>(entries: T[]): T[] {
+  if (entries.length === 0) return []
+  const max = Math.max(...entries.map((e) => e.count))
+  return entries.filter((e) => e.count === max)
 }
 
 function SmartSummary({
@@ -317,49 +351,53 @@ function SmartSummary({
   const structure = analyzeStructure(questions)
   const items: { label: string; value: string }[] = []
 
+  const countMulti = (answers: any[]) => {
+    const counts: Record<string, number> = {}
+    answers.filter(Array.isArray).forEach((arr: string[]) => arr.forEach((opt) => (counts[opt] = (counts[opt] || 0) + 1)))
+    return Object.entries(counts).map(([name, count]) => ({ name, count }))
+  }
+  const joinNames = (tops: { name: string }[]) => tops.map((t) => t.name).join(' / ') + (tops.length > 1 ? ' (رای برابر)' : '')
+
   const shortTermStrategyQ = structure.shortTermQs.find((q) => q.question_type === 'multi')
   if (shortTermStrategyQ) {
-    const answers = getResponsesFor(shortTermStrategyQ.id) as string[][]
-    if (answers.length > 0) {
-      const counts: Record<string, number> = {}
-      answers.forEach((arr) => arr.forEach((opt) => (counts[opt] = (counts[opt] || 0) + 1)))
-      const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-      if (top) items.push({ label: 'استراتژی غالب کوتاه‌مدت (۲ هفته)', value: top[0] })
-    }
+    const tops = topOf(countMulti(getResponsesFor(shortTermStrategyQ.id)))
+    if (tops.length > 0) items.push({ label: 'استراتژی غالب کوتاه‌مدت (۲ هفته)', value: joinNames(tops) })
   }
 
   if (structure.winnerQ) {
-    const answers = getResponsesFor(structure.winnerQ.id) as string[]
+    const answers = getResponsesFor(structure.winnerQ.id).filter((a) => typeof a === 'string') as string[]
     if (answers.length > 0) {
       const counts: Record<string, number> = {}
       answers.forEach((a) => (counts[a] = (counts[a] || 0) + 1))
-      const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-      const percent = Math.round((winner[1] / answers.length) * 100)
-      items.push({ label: 'دارایی برنده از نظر کمیته (بلندمدت)', value: `${winner[0]} (${percent}٪)` })
+      const tops = topOf(Object.entries(counts).map(([name, count]) => ({ name, count })))
+      const percent = fmtPct((tops[0].count / answers.length) * 100)
+      items.push({
+        label: 'دارایی برنده از نظر کمیته (بلندمدت)',
+        value: tops.length > 1 ? `${joinNames(tops)} — هر کدام ${percent}` : `${tops[0].name} (${percent})`,
+      })
     }
   }
 
   if (structure.longTermAllocationQ) {
-    const answers = getResponsesFor(structure.longTermAllocationQ.id) as Record<string, number>[]
+    const answers = getResponsesFor(structure.longTermAllocationQ.id).filter(
+      (a) => a && typeof a === 'object'
+    ) as Record<string, number>[]
     if (answers.length > 0) {
       const avgData = (structure.longTermAllocationQ.options as string[]).map((label) => {
-        const values = answers.map((a) => Number(a[label] || 0))
-        const avg = values.reduce((a, b) => a + b, 0) / values.length
-        return { label, avg: Math.round(avg) }
+        const avg = answers.reduce((sum, a) => sum + Number(a[label] || 0), 0) / answers.length
+        return { name: label, count: round1(avg) }
       })
-      const top = avgData.sort((a, b) => b.avg - a.avg)[0]
-      items.push({ label: 'تخصیص پیشنهادی غالب (بلندمدت)', value: `${top.label} — ${top.avg}٪` })
+      const tops = topOf(avgData)
+      items.push({
+        label: 'تخصیص پیشنهادی غالب (بلندمدت)',
+        value: tops.length > 1 ? `${joinNames(tops)} — هر کدام ${fmtPct(tops[0].count)}` : `${tops[0].name} — ${fmtPct(tops[0].count)}`,
+      })
     }
   }
 
   if (structure.riskQ) {
-    const answers = getResponsesFor(structure.riskQ.id) as string[][]
-    if (answers.length > 0) {
-      const counts: Record<string, number> = {}
-      answers.forEach((arr) => arr.forEach((opt) => (counts[opt] = (counts[opt] || 0) + 1)))
-      const topRisk = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-      if (topRisk) items.push({ label: 'مهم‌ترین ریسک شناسایی‌شده', value: topRisk[0] })
-    }
+    const tops = topOf(countMulti(getResponsesFor(structure.riskQ.id)))
+    if (tops.length > 0) items.push({ label: 'مهم‌ترین ریسک شناسایی‌شده', value: joinNames(tops) })
   }
 
   if (items.length === 0) return null
@@ -381,7 +419,8 @@ function SmartSummary({
   )
 }
 
-function QuestionCard({ question, rawAnswers }: { question: Question; rawAnswers: any[] }) {
+function QuestionCard({ question, rawAnswers: allAnswers }: { question: Question; rawAnswers: any[] }) {
+  const rawAnswers = allAnswers.filter((a) => isValidAnswer(question.question_type, a))
   const total = rawAnswers.length
 
   return (
@@ -413,30 +452,30 @@ function QuestionCard({ question, rawAnswers }: { question: Question; rawAnswers
 }
 
 function SingleChart({ options, answers }: { options: string[]; answers: string[] }) {
-  // رنگ هر گزینه یک‌بار و بر اساس جایگاه «اصلی» آن در فهرست گزینه‌ها تعیین می‌شود (قبل از مرتب‌سازی)،
-  // و همان رنگ هم برای برش نمودار و هم برای راهنما و tooltip استفاده می‌شود.
-  // ترتیب نمایش هم یکی است: از بیشترین به کمترین رای (مرتب‌سازی پایدار؛ در تساوی، ترتیب اصلی گزینه‌ها حفظ می‌شود).
-  const data = options
-    .map((opt, i) => ({
-      name: opt,
-      value: answers.filter((a) => a === opt).length,
-      color: getColor(opt, i),
-    }))
-    .sort((a, b) => b.value - a.value)
+  // رنگ هر گزینه فقط به «هویت» آن بستگی دارد و همان رنگ برای برش، راهنما و tooltip استفاده می‌شود.
+  // سوال‌های ترتیبی (مثل سطح ریسک): رنگ = طیف روشن←تیره و ترتیب نمایش = ترتیب طبیعی (از کم به زیاد).
+  // سایر سوال‌ها: ترتیب از بیشترین به کمترین رای (در تساوی، ترتیب اصلی گزینه‌ها).
+  const levels = getOrdinalLevels(options)
+  const total = answers.length
+  let data = options.map((opt, i) => ({
+    name: opt,
+    value: answers.filter((a) => a === opt).length,
+    color: levels ? ORDINAL_RAMP[levels[i]] : getColor(opt, i),
+    level: levels ? levels[i] : 0,
+  }))
+  data = levels ? data.sort((a, b) => a.level - b.level) : data.sort((a, b) => b.value - a.value)
 
-  const percentOf = (value: number) => (answers.length > 0 ? Math.round((value / answers.length) * 100) : 0)
-  const maxItem = data[0]
-  const consensus = percentOf(maxItem.value)
+  const percentOf = (value: number) => (total > 0 ? round1((value / total) * 100) : 0)
+  const maxValue = Math.max(...data.map((d) => d.value))
   // اگر چند گزینه رای برابر و بیشینه دارند، همه‌شان گزارش می‌شوند (نه فقط اولی)
-  const topItems = data.filter((d) => d.value === maxItem.value)
+  const topItems = data.filter((d) => d.value === maxValue)
   const isTie = topItems.length > 1
-  // جمع درصدهای گردشده‌ی نمایش‌داده‌شده؛ اگر ۱۰۰ نشد، دلیلش (گرد کردن) به خواننده گفته می‌شود
-  const roundedTotal = data.reduce((sum, d) => sum + percentOf(d.value), 0)
+  const consensus = percentOf(maxValue)
 
   return (
     <div>
       <div className="flex items-center gap-5">
-        <ResponsiveContainer width={150} height={150}>
+        <ResponsiveContainer width={160} height={160}>
           <PieChart>
             <Pie
               data={data}
@@ -446,21 +485,22 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               cy="50%"
               startAngle={90}
               endAngle={-270}
-              innerRadius={44}
-              outerRadius={70}
+              innerRadius={38}
+              outerRadius={76}
               stroke="#fff"
               strokeWidth={2}
+              isAnimationActive={false}
               labelLine={false}
               label={(props: any) => {
                 // درصد روی خود برش (برای برش‌های به‌اندازه‌ی کافی بزرگ)، تا اندازه‌ها بدون نگاه به راهنما قابل مقایسه باشند
-                const { cx, cy, midAngle, innerRadius, outerRadius, value } = props
+                const { cx, cy, midAngle, innerRadius, outerRadius, value, payload } = props
                 const pct = percentOf(Number(value))
-                if (pct < 8) return null
+                if (pct < 10) return null
                 const r = (Number(innerRadius) + Number(outerRadius)) / 2
                 const rad = (Math.PI / 180) * -Number(midAngle)
                 return (
-                  <text x={cx + r * Math.cos(rad)} y={cy + r * Math.sin(rad)} fill="#fff" fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="central">
-                    {pct}٪
+                  <text x={cx + r * Math.cos(rad)} y={cy + r * Math.sin(rad)} fill={textOn(payload?.color || '#000000')} fontSize={10} fontWeight={700} textAnchor="middle" dominantBaseline="central">
+                    {fmtPct(pct)}
                   </text>
                 )
               }}
@@ -470,7 +510,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               ))}
             </Pie>
             <Tooltip
-              formatter={(value: any, name: any) => [`${value} نفر (${percentOf(Number(value))}٪)`, name]}
+              formatter={(value: any, name: any) => [`${value} نفر (${fmtPct(percentOf(Number(value)))})`, name]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -481,7 +521,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
               <span className="text-slate-600 flex-1">{d.name}</span>
               <span className="text-slate-400 tabular-nums">{d.value} نفر</span>
-              <span className="font-semibold text-slate-900 w-9 text-left">{percentOf(d.value)}٪</span>
+              <span className="font-semibold text-slate-900 w-12 text-left tabular-nums">{fmtPct(percentOf(d.value))}</span>
             </div>
           ))}
         </div>
@@ -489,18 +529,13 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
         {isTie ? (
           <>
-            رای برابر: <span className="font-semibold text-slate-700">{consensus}٪</span> برای هر یک از{' '}
+            رای برابر: <span className="font-semibold text-slate-700">{fmtPct(consensus)}</span> برای هر یک از{' '}
             {topItems.map((t) => `«${t.name}»`).join(' و ')}
           </>
         ) : (
           <>
-            اجماع کمیته: <span className="font-semibold text-slate-700">{consensus}٪</span> روی «{maxItem.name}»
+            بیشترین رای: <span className="font-semibold text-slate-700">{fmtPct(consensus)}</span> برای «{topItems[0].name}»
           </>
-        )}
-        {roundedTotal !== 100 && (
-          <span className="block mt-1">
-            درصدها به نزدیک‌ترین عدد صحیح گرد شده‌اند؛ جمع نمایش‌داده‌شده {roundedTotal}٪ است.
-          </span>
         )}
       </p>
     </div>
@@ -571,7 +606,7 @@ function MultiChart({ answers }: { answers: string[][] }) {
             tickLine={false}
           />
           <Tooltip cursor={{ fill: '#f8fafc' }} />
-          <Bar dataKey="value" fill="#475569" radius={[0, 4, 4, 0]} />
+          <Bar dataKey="value" fill="#475569" radius={[0, 4, 4, 0]} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -670,7 +705,7 @@ function SliderGroupChart({
 }) {
   const data = options.assets
     .map((asset, i) => {
-      const values = answers.map((a) => Number(a[asset.name] ?? 0))
+      const values = answers.map((a) => Number(a[asset.name] ?? asset.min ?? 0))
       const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0
       // رنگ بر اساس جایگاه اصلی دارایی (قبل از مرتب‌سازی) تا با تغییر رتبه جابه‌جا نشود
       return { name: asset.name, value: Math.round(avg * 10) / 10, color: getColor(asset.name, i) }
@@ -697,7 +732,7 @@ function SliderGroupChart({
               tickLine={false}
             />
             <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${v}${options.unit}`} />
-            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} isAnimationActive={false}>
               {data.map((entry) => (
                 <Cell key={entry.name} fill={entry.color} />
               ))}
@@ -721,15 +756,14 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
     .map((label, i) => {
       const values = answers.map((a) => Number(a[label] || 0))
       const avg = values.reduce((a, b) => a + b, 0) / values.length
-      return { name: label, value: Math.round(avg), color: getColor(label, i) }
+      return { name: label, value: round1(avg), color: getColor(label, i) }
     })
     .sort((a, b) => b.value - a.value)
-  const allocationTotal = avgData.reduce((sum, d) => sum + d.value, 0)
 
   return (
     <div>
       <div className="flex items-center gap-5">
-        <ResponsiveContainer width={150} height={150}>
+        <ResponsiveContainer width={160} height={160}>
           <PieChart>
             <Pie
               data={avgData}
@@ -739,16 +773,17 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
               cy="50%"
               startAngle={90}
               endAngle={-270}
-              innerRadius={44}
-              outerRadius={70}
+              innerRadius={38}
+              outerRadius={76}
               stroke="#fff"
               strokeWidth={2}
+              isAnimationActive={false}
             >
               {avgData.map((entry) => (
                 <Cell key={entry.name} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip formatter={(value: any, name: any) => [`${value}٪`, name]} />
+            <Tooltip formatter={(value: any, name: any) => [fmtPct(Number(value)), name]} />
           </PieChart>
         </ResponsiveContainer>
         <div className="flex-1 space-y-2">
@@ -756,18 +791,13 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
             <div key={d.name} className="flex items-center gap-2 text-xs">
               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
               <span className="text-slate-600 flex-1">{d.name}</span>
-              <span className="font-semibold text-slate-900">{d.value}٪</span>
+              <span className="font-semibold text-slate-900 tabular-nums">{fmtPct(d.value)}</span>
             </div>
           ))}
         </div>
       </div>
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
         میانگین تخصیص پیشنهادی کمیته
-        {allocationTotal !== 100 && (
-          <span className="block mt-1">
-            مقادیر به نزدیک‌ترین عدد صحیح گرد شده‌اند؛ جمع نمایش‌داده‌شده {allocationTotal}٪ است.
-          </span>
-        )}
       </p>
     </div>
   )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../lib/supabase'
 
@@ -122,9 +122,17 @@ export default function QuestionsPage() {
   const [error, setError] = useState('')
   const [finishing, setFinishing] = useState(false)
   const [done, setDone] = useState(false)
+  const [expired, setExpired] = useState(false)
+  const submittingRef = useRef(false) // جلوگیری از ثبت دوباره با دوبار کلیک
 
-  const participantId = typeof window !== 'undefined' ? sessionStorage.getItem('participant_id') : null
-  const sessionId = typeof window !== 'undefined' ? sessionStorage.getItem('session_id') : null
+  // شناسه‌ها فقط یک‌بار (هنگام ورود به صفحه) خوانده می‌شوند، چون بعد از ثبت موفق از sessionStorage پاک می‌شوند
+  // و صفحه‌ی «ثبت شد» همچنان به شناسه‌ی جلسه برای لینک گزارش نیاز دارد.
+  const [participantId] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? sessionStorage.getItem('participant_id') : null
+  )
+  const [sessionId] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? sessionStorage.getItem('session_id') : null
+  )
 
   useEffect(() => {
     if (!participantId || !sessionId) {
@@ -135,12 +143,19 @@ export default function QuestionsPage() {
     async function loadQuestions() {
       const { data: sessionData, error: sessionError } = await supabase
         .from('sessions')
-        .select('question_set_id')
+        .select('question_set_id, expires_at')
         .eq('id', sessionId)
         .single()
 
       if (sessionError || !sessionData) {
         setError('خطا در دریافت اطلاعات جلسه')
+        setLoading(false)
+        return
+      }
+
+      // جلسه‌ی تمام‌شده دیگر پاسخ نمی‌پذیرد (حتی اگر لینک مستقیم یا نشست قدیمی مرورگر باشد)
+      if (sessionData.expires_at && new Date(sessionData.expires_at).getTime() <= Date.now()) {
+        setExpired(true)
         setLoading(false)
         return
       }
@@ -165,6 +180,27 @@ export default function QuestionsPage() {
 
   function setAnswer(questionId: string, value: any) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }))
+  }
+
+  // پاسخ «واقعی» هر سوال: اسلایدری که دست نخورده، همان مقدار نمایش‌داده‌شده (حداقل) را دارد.
+  // این مقدار هم برای اعتبارسنجی و هم برای ذخیره استفاده می‌شود، تا پاسخ خالی (null) ذخیره نشود.
+  function effectiveAnswer(q: Question, source: Record<string, any> = answers) {
+    if (q.question_type === 'slider_group') {
+      const current = source[q.id] || {}
+      const filled: Record<string, number> = {}
+      for (const asset of (q.options?.assets || []) as SliderAsset[]) {
+        filled[asset.name] = Number(current[asset.name] ?? asset.min)
+      }
+      return filled
+    }
+    if (q.question_type === 'slider') return Number(source[q.id] ?? q.options?.min ?? 0)
+    return source[q.id]
+  }
+
+  function effectiveAnswers() {
+    const all: Record<string, any> = {}
+    for (const q of questions) all[q.id] = effectiveAnswer(q)
+    return all
   }
 
   function isAnswered(q: Question) {
@@ -199,7 +235,7 @@ export default function QuestionsPage() {
     }
 
     if (consistencyBlock && q.id === consistencyBlock.returnsQ.id) {
-      const returnsError = checkReturnsConsistency(consistencyBlock, answers)
+      const returnsError = checkReturnsConsistency(consistencyBlock, effectiveAnswers())
       if (returnsError) {
         setError(returnsError)
         return
@@ -207,7 +243,7 @@ export default function QuestionsPage() {
     }
 
     if (consistencyBlock && q.id === consistencyBlock.longTermAllocationQ.id) {
-      const allocationError = checkAllocationConsistency(consistencyBlock, answers)
+      const allocationError = checkAllocationConsistency(consistencyBlock, effectiveAnswers())
       if (allocationError) {
         setError(allocationError)
         return
@@ -229,12 +265,25 @@ export default function QuestionsPage() {
   }
 
   async function submitAllAnswers() {
+    if (submittingRef.current) return
+    submittingRef.current = true
     setFinishing(true)
+
+    // قبل از ثبت دوباره زمان جلسه را بررسی می‌کنیم
+    const { data: sessionNow } = await supabase.from('sessions').select('expires_at').eq('id', sessionId).single()
+    if (sessionNow?.expires_at && new Date(sessionNow.expires_at).getTime() <= Date.now()) {
+      setExpired(true)
+      setFinishing(false)
+      submittingRef.current = false
+      return
+    }
+
+    const final = effectiveAnswers()
     const rows = questions.map((q) => ({
       session_id: sessionId,
       question_id: q.id,
       participant_id: participantId,
-            answer: answers[q.id] ?? (q.question_type === 'slider' ? 0 : answers[q.id]),
+      answer: final[q.id],
     }))
 
     const { error: insertError } = await supabase.from('responses').insert(rows)
@@ -242,8 +291,15 @@ export default function QuestionsPage() {
     if (insertError) {
       setError('خطا در ثبت پاسخ‌ها. لطفاً دوباره تلاش کنید.')
       setFinishing(false)
+      submittingRef.current = false
       return
     }
+
+    // بعد از ثبت موفق، شناسه‌ی شرکت‌کننده پاک می‌شود تا با رفرش یا دکمه‌ی «بازگشت» دوباره ثبت نشود
+    try {
+      sessionStorage.removeItem('participant_id')
+      sessionStorage.removeItem('session_id')
+    } catch {}
 
     setDone(true)
     setFinishing(false)
@@ -260,7 +316,21 @@ export default function QuestionsPage() {
     )
   }
 
-if (done) {
+if (expired) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4" dir="rtl">
+        <div className="text-center bg-white border border-slate-200 rounded-xl p-10 max-w-md w-full">
+          <h1 className="text-lg font-bold text-slate-900 mb-1.5">زمان این جلسه به پایان رسیده است</h1>
+          <p className="text-sm text-slate-500 mb-6">دیگر امکان ثبت پاسخ برای این جلسه وجود ندارد.</p>
+          {sessionId && (
+            <a href={`/reports/${sessionId}`} className="inline-block bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-6 py-2.5 rounded-md transition">مشاهده‌ی گزارش</a>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (done) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4" dir="rtl">
         <div className="text-center bg-white border border-slate-200 rounded-xl p-10 max-w-md w-full">
