@@ -471,6 +471,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
   const topItems = data.filter((d) => d.value === maxValue)
   const isTie = topItems.length > 1
   const consensus = percentOf(maxValue)
+  const pctTotal = data.reduce((sum, d) => sum + percentOf(d.value), 0)
 
   return (
     <div>
@@ -536,6 +537,11 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
           <>
             بیشترین رای: <span className="font-semibold text-slate-700">{fmtPct(consensus)}</span> برای «{topItems[0].name}»
           </>
+        )}
+        {Math.abs(pctTotal - 100) > 0.05 && (
+          <span className="block mt-1">
+            جمع درصدها به‌دلیل گرد کردن به یک رقم اعشار، {round1(pctTotal)}٪ شده است.
+          </span>
         )}
       </p>
     </div>
@@ -759,6 +765,7 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
       return { name: label, value: round1(avg), color: getColor(label, i) }
     })
     .sort((a, b) => b.value - a.value)
+  const allocTotal = avgData.reduce((sum, d) => sum + d.value, 0)
 
   return (
     <div>
@@ -798,6 +805,11 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
       </div>
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
         میانگین تخصیص پیشنهادی کمیته
+        {Math.abs(allocTotal - 100) > 0.05 && (
+          <span className="block mt-1">
+            جمع درصدها به‌دلیل گرد کردن به یک رقم اعشار، {round1(allocTotal)}٪ شده است.
+          </span>
+        )}
       </p>
     </div>
   )
