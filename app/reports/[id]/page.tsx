@@ -424,9 +424,14 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
     }))
     .sort((a, b) => b.value - a.value)
 
-  const maxItem = data[0]
-  const consensus = answers.length > 0 ? Math.round((maxItem.value / answers.length) * 100) : 0
   const percentOf = (value: number) => (answers.length > 0 ? Math.round((value / answers.length) * 100) : 0)
+  const maxItem = data[0]
+  const consensus = percentOf(maxItem.value)
+  // اگر چند گزینه رای برابر و بیشینه دارند، همه‌شان گزارش می‌شوند (نه فقط اولی)
+  const topItems = data.filter((d) => d.value === maxItem.value)
+  const isTie = topItems.length > 1
+  // جمع درصدهای گردشده‌ی نمایش‌داده‌شده؛ اگر ۱۰۰ نشد، دلیلش (گرد کردن) به خواننده گفته می‌شود
+  const roundedTotal = data.reduce((sum, d) => sum + percentOf(d.value), 0)
 
   return (
     <div>
@@ -465,7 +470,21 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
         </div>
       </div>
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
-        اجماع کمیته: <span className="font-semibold text-slate-700">{consensus}٪</span> روی «{maxItem.name}»
+        {isTie ? (
+          <>
+            رای برابر: <span className="font-semibold text-slate-700">{consensus}٪</span> برای هر یک از{' '}
+            {topItems.map((t) => `«${t.name}»`).join(' و ')}
+          </>
+        ) : (
+          <>
+            اجماع کمیته: <span className="font-semibold text-slate-700">{consensus}٪</span> روی «{maxItem.name}»
+          </>
+        )}
+        {roundedTotal !== 100 && (
+          <span className="block mt-1">
+            درصدها به نزدیک‌ترین عدد صحیح گرد شده‌اند؛ جمع نمایش‌داده‌شده {roundedTotal}٪ است.
+          </span>
+        )}
       </p>
     </div>
   )
@@ -688,6 +707,7 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
       return { name: label, value: Math.round(avg), color: getColor(label, i) }
     })
     .sort((a, b) => b.value - a.value)
+  const allocationTotal = avgData.reduce((sum, d) => sum + d.value, 0)
 
   return (
     <div>
@@ -724,6 +744,11 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
       </div>
       <p className="text-[11px] text-slate-400 mt-4 pt-3 border-t border-slate-100">
         میانگین تخصیص پیشنهادی کمیته
+        {allocationTotal !== 100 && (
+          <span className="block mt-1">
+            مقادیر به نزدیک‌ترین عدد صحیح گرد شده‌اند؛ جمع نمایش‌داده‌شده {allocationTotal}٪ است.
+          </span>
+        )}
       </p>
     </div>
   )
