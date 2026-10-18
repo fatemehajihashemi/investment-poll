@@ -276,7 +276,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
   return (
     <div>
       <div className="flex items-center gap-5">
-        <ResponsiveContainer width={130} height={130}>
+        <ResponsiveContainer width={150} height={150}>
           <PieChart>
             <Pie
               data={data}
@@ -284,10 +284,26 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               nameKey="name"
               cx="50%"
               cy="50%"
-              innerRadius={38}
-              outerRadius={62}
+              startAngle={90}
+              endAngle={-270}
+              innerRadius={44}
+              outerRadius={70}
               stroke="#fff"
               strokeWidth={2}
+              labelLine={false}
+              label={(props: any) => {
+                // درصد روی خود برش (برای برش‌های به‌اندازه‌ی کافی بزرگ)، تا اندازه‌ها بدون نگاه به راهنما قابل مقایسه باشند
+                const { cx, cy, midAngle, innerRadius, outerRadius, value } = props
+                const pct = percentOf(Number(value))
+                if (pct < 8) return null
+                const r = (Number(innerRadius) + Number(outerRadius)) / 2
+                const rad = (Math.PI / 180) * -Number(midAngle)
+                return (
+                  <text x={cx + r * Math.cos(rad)} y={cy + r * Math.sin(rad)} fill="#fff" fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="central">
+                    {pct}٪
+                  </text>
+                )
+              }}
             >
               {data.map((entry) => (
                 <Cell key={entry.name} fill={entry.color} />
@@ -304,7 +320,8 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
             <div key={d.name} className="flex items-center gap-2 text-xs">
               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
               <span className="text-slate-600 flex-1">{d.name}</span>
-              <span className="font-semibold text-slate-900">{percentOf(d.value)}٪</span>
+              <span className="text-slate-400 tabular-nums">{d.value} نفر</span>
+              <span className="font-semibold text-slate-900 w-9 text-left">{percentOf(d.value)}٪</span>
             </div>
           ))}
         </div>
@@ -497,7 +514,7 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
   return (
     <div>
       <div className="flex items-center gap-5">
-        <ResponsiveContainer width={130} height={130}>
+        <ResponsiveContainer width={150} height={150}>
           <PieChart>
             <Pie
               data={avgData}
@@ -505,8 +522,10 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
               nameKey="name"
               cx="50%"
               cy="50%"
-              innerRadius={38}
-              outerRadius={62}
+              startAngle={90}
+              endAngle={-270}
+              innerRadius={44}
+              outerRadius={70}
               stroke="#fff"
               strokeWidth={2}
             >
