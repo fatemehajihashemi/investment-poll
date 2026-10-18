@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { supabase } from '../lib/supabase'
+import { fa } from '../lib/format'
 
 type Session = {
   id: string
@@ -33,6 +34,15 @@ export default function ReportsListPage() {
       const counts: Record<string, number> = {}
       await Promise.all(
         list.map(async (s) => {
+          // تعداد کسانی که واقعاً پاسخ داده‌اند (نه فقط وارد شده‌اند)؛ اگر این پرس‌وجو خطا داد، تعداد واردشده‌ها نمایش داده می‌شود.
+          const answered = await supabase
+            .from('participants')
+            .select('id, responses!inner(id)', { count: 'exact', head: true })
+            .eq('session_id', s.id)
+          if (!answered.error && answered.count !== null) {
+            counts[s.id] = answered.count
+            return
+          }
           const { count } = await supabase
             .from('participants')
             .select('*', { count: 'exact', head: true })
@@ -105,10 +115,10 @@ export default function ReportsListPage() {
                 </p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
                   <span>تاریخ ایجاد: {formatDate(s.created_at)}</span>
-                  <span>مدت: {s.duration_minutes} دقیقه</span>
+                  <span>مدت: {fa(s.duration_minutes)} دقیقه</span>
                   <span>
-                    شرکت‌کننده: {participantCounts[s.id] ?? 0}
-                    {s.expected_participants ? ` از ${s.expected_participants}` : ''}
+                    شرکت‌کننده: {fa(participantCounts[s.id] ?? 0)}
+                    {s.expected_participants ? ` از ${fa(s.expected_participants)}` : ''}
                   </span>
                 </div>
               </Link>

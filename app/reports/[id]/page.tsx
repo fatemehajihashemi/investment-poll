@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { getOptionColor, getOrdinalLevels, ORDINAL_RAMP, textOn } from '../../lib/chartColors'
+import { fa, fa1, round1, fmtPct } from '../../lib/format'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -19,6 +20,7 @@ type Question = {
   question_text: string
   question_type: 'single' | 'multi' | 'slider' | 'allocation' | 'slider_group'
   options: any
+  max_select?: number | null
 }
 
 type ResponseRow = {
@@ -30,10 +32,7 @@ type ResponseRow = {
 // رنگ همه‌ی نمودارها فقط از یک منبع می‌آید (app/lib/chartColors.ts)؛ جزئیات قانون آنجاست.
 const getColor = getOptionColor
 
-// درصد با «یک رقم اعشار» (۳۶٫۴٪)؛ عدد صحیح بدون .۰ نمایش داده می‌شود (۵۰٪).
-// عدد نمایش‌داده‌شده همان نتیجه‌ی محاسبه است، بدون دستکاری برای رسیدن به جمع ۱۰۰.
-const round1 = (n: number) => Math.round(n * 10) / 10
-const fmtPct = (n: number) => `${round1(n)}٪`
+// قالب اعداد (ارقام فارسی، درصد با یک رقم اعشار) از app/lib/format.ts می‌آید تا همه‌ی گزارش یکدست باشد.
 
 // پاسخ‌های نامعتبر (null، نوع اشتباه) نباید گزارش را از کار بیندازند یا شمرده شوند.
 function isValidAnswer(type: Question['question_type'], a: any): boolean {
@@ -152,7 +151,8 @@ export default function SessionReportPage() {
   const [session, setSession] = useState<any>(null)
   const [questions, setQuestions] = useState<Question[]>([])
   const [responses, setResponses] = useState<ResponseRow[]>([])
-  const [participantCount, setParticipantCount] = useState(0)
+  // joinedCount = کسانی که وارد جلسه شده‌اند؛ تعداد «شرکت‌کننده» در گزارش = کسانی که واقعاً پاسخ داده‌اند (از روی خود پاسخ‌ها محاسبه می‌شود)
+  const [joinedCount, setJoinedCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
@@ -160,7 +160,7 @@ export default function SessionReportPage() {
   const loadData = useCallback(async () => {
     const { data: sessionData } = await supabase
       .from('sessions')
-      .select('id, title, teams(name), question_set_id, expires_at')
+      .select('id, title, teams(name), question_set_id, expires_at, expected_participants')
       .eq('id', sessionId)
       .maybeSingle()
 
@@ -203,7 +203,7 @@ export default function SessionReportPage() {
       .select('*', { count: 'exact', head: true })
       .eq('session_id', sessionData.id)
 
-    setParticipantCount(count || 0)
+    setJoinedCount(count || 0)
     setLastUpdated(new Date())
     setLoading(false)
   }, [sessionId])
@@ -236,6 +236,9 @@ export default function SessionReportPage() {
 
   const isActive = new Date(session.expires_at).getTime() > Date.now()
   const structure = analyzeStructure(questions)
+  const answeredCount = countRespondents(questions, responses)
+  const expected: number | null = session.expected_participants || null
+  const joinedNoAnswer = Math.max(0, joinedCount - answeredCount)
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8" dir="rtl">
@@ -265,8 +268,15 @@ export default function SessionReportPage() {
 
             <div className="flex items-center gap-6">
               <div className="text-center">
-                <p className="text-2xl font-bold text-slate-900">{participantCount}</p>
-                <p className="text-[11px] text-slate-400">شرکت‌کننده</p>
+                <p className="text-2xl font-bold text-slate-900 tabular-nums">{fa(answeredCount)}</p>
+                <p className="text-[11px] text-slate-400">شرکت‌کننده (پاسخ‌دهنده)</p>
+                {(expected || joinedNoAnswer > 0) && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {expected ? `از ${fa(expected)} نفر مورد انتظار` : ''}
+                    {expected && joinedNoAnswer > 0 ? ' · ' : ''}
+                    {joinedNoAnswer > 0 ? `${fa(joinedNoAnswer)} نفر وارد شده‌اند و هنوز پاسخ نداده‌اند` : ''}
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-1.5 print:hidden">
                 <button
@@ -296,7 +306,7 @@ export default function SessionReportPage() {
         {structure.shortTermQs.length > 0 && (
           <section className="mt-8">
             <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">
-              چشم‌انداز کوتاه‌مدت (۲ هفته آینده)
+              چشم‌انداز کوتاه‌مدت
             </h2>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               {structure.shortTermQs.map((q) => (
@@ -309,7 +319,7 @@ export default function SessionReportPage() {
         {structure.longTermQs.length > 0 && (
           <section className="mt-8">
             <h2 className="text-sm font-bold text-slate-700 mb-3 break-after-avoid-page">
-              چشم‌انداز بلندمدت (تا پایان سال ۱۴۰۵)
+              چشم‌انداز بلندمدت
             </h2>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               {structure.longTermQs.map((q) => (
@@ -332,6 +342,22 @@ export default function SessionReportPage() {
       </div>
     </div>
   )
+}
+
+// تعداد افرادی که واقعاً حداقل یک پاسخ معتبر ثبت کرده‌اند (نه فقط وارد جلسه شده‌اند).
+// پاسخ‌های قدیمی بدون participant_id قابل ردیابی نیستند؛ برای آن‌ها بیشترین تعداد پاسخ در یک سوال ملاک است.
+function countRespondents(questions: Question[], responses: ResponseRow[]): number {
+  const typeOf = new Map(questions.map((q) => [q.id, q.question_type] as const))
+  const ids = new Set<string>()
+  const anonPerQuestion: Record<string, number> = {}
+  responses.forEach((r) => {
+    const type = typeOf.get(r.question_id)
+    if (!type || !isValidAnswer(type, r.answer)) return
+    if (r.participant_id) ids.add(r.participant_id)
+    else anonPerQuestion[r.question_id] = (anonPerQuestion[r.question_id] || 0) + 1
+  })
+  const anonMax = Math.max(0, ...Object.values(anonPerQuestion))
+  return ids.size + anonMax
 }
 
 // همه‌ی گزینه‌هایی که بیشترین مقدار را دارند (در تساوی، همه برمی‌گردند، نه فقط اولی)
@@ -361,7 +387,7 @@ function SmartSummary({
   const shortTermStrategyQ = structure.shortTermQs.find((q) => q.question_type === 'multi')
   if (shortTermStrategyQ) {
     const tops = topOf(countMulti(getResponsesFor(shortTermStrategyQ.id)))
-    if (tops.length > 0) items.push({ label: 'استراتژی غالب کوتاه‌مدت (۲ هفته)', value: joinNames(tops) })
+    if (tops.length > 0) items.push({ label: 'استراتژی غالب کوتاه‌مدت', value: joinNames(tops) })
   }
 
   if (structure.winnerQ) {
@@ -430,7 +456,7 @@ function QuestionCard({ question, rawAnswers: allAnswers }: { question: Question
           {question.question_text}
         </h3>
         <span className="shrink-0 text-[11px] text-slate-400 bg-slate-50 border border-slate-100 rounded px-2 py-0.5">
-          {total} پاسخ
+          {fa(total)} پاسخ
         </span>
       </div>
 
@@ -439,7 +465,7 @@ function QuestionCard({ question, rawAnswers: allAnswers }: { question: Question
       ) : question.question_type === 'single' ? (
         <SingleChart options={question.options} answers={rawAnswers} />
       ) : question.question_type === 'multi' ? (
-        <MultiChart answers={rawAnswers} />
+        <MultiChart options={Array.isArray(question.options) ? question.options : []} maxSelect={question.max_select ?? null} answers={rawAnswers} />
       ) : question.question_type === 'slider' ? (
         <SliderChart answers={rawAnswers} unit={question.options.unit} />
       ) : question.question_type === 'slider_group' ? (
@@ -511,7 +537,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
               ))}
             </Pie>
             <Tooltip
-              formatter={(value: any, name: any) => [`${value} نفر (${fmtPct(percentOf(Number(value)))})`, name]}
+              formatter={(value: any, name: any) => [`${fa(Number(value))} نفر (${fmtPct(percentOf(Number(value)))})`, name]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -521,7 +547,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
             <div key={d.name} className="flex items-center gap-2 text-xs">
               <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: d.color }} />
               <span className="text-slate-600 flex-1">{d.name}</span>
-              <span className="text-slate-400 tabular-nums">{d.value} نفر</span>
+              <span className="text-slate-400 tabular-nums">{fa(d.value)} نفر</span>
               <span className="font-semibold text-slate-900 w-12 text-left tabular-nums">{fmtPct(percentOf(d.value))}</span>
             </div>
           ))}
@@ -540,7 +566,7 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
         )}
         {Math.abs(pctTotal - 100) > 0.05 && (
           <span className="block mt-1">
-            جمع درصدها به‌دلیل گرد کردن به یک رقم اعشار، {round1(pctTotal)}٪ شده است.
+            جمع درصدها به‌دلیل گرد کردن به یک رقم اعشار، {fmtPct(pctTotal)} شده است.
           </span>
         )}
       </p>
@@ -548,73 +574,86 @@ function SingleChart({ options, answers }: { options: string[]; answers: string[
   )
 }
 
-function wrapText(text: string, maxCharsPerLine: number): string[] {
-  const words = text.split(' ')
-  const lines: string[] = []
-  let current = ''
-  words.forEach((word) => {
-    if ((current + ' ' + word).trim().length > maxCharsPerLine) {
-      if (current) lines.push(current.trim())
-      current = word
-    } else {
-      current = (current + ' ' + word).trim()
-    }
-  })
-  if (current) lines.push(current)
-  return lines
-}
-
-function WrappedYAxisTick({ x, y, payload }: any) {
-  const lines = wrapText(payload.value, 18)
-  return (
-    <g transform={`translate(${x},${y})`}>
-      {lines.map((line, i) => (
-        <text
-          key={i}
-          x={0}
-          y={(i - (lines.length - 1) / 2) * 12}
-          textAnchor="end"
-          fill="#475569"
-          fontSize={11}
-        >
-          {line}
-        </text>
-      ))}
-    </g>
-  )
-}
-
-function MultiChart({ answers }: { answers: string[][] }) {
+function MultiChart({
+  options,
+  maxSelect,
+  answers,
+}: {
+  options: string[]
+  maxSelect: number | null
+  answers: string[][]
+}) {
+  // مبنا = تعداد پاسخ‌دهنده‌ها (نه تعداد کل انتخاب‌ها)، پس هر نوار یعنی «چند درصد از افراد این گزینه را انتخاب کرده‌اند».
+  // محور از ۰ تا ۱۰۰٪ ثابت است تا طول نوارها مستقیم با تعداد شرکت‌کنندگان قابل مقایسه باشد.
+  // گزینه‌های بدون رای هم مثل نمودار تک‌انتخابی نمایش داده می‌شوند (۰ نفر).
+  const respondents = answers.length
   const counts: Record<string, number> = {}
   answers.forEach((arr) => {
-    arr.forEach((opt) => {
+    new Set(arr.filter((o) => typeof o === 'string')).forEach((opt) => {
       counts[opt] = (counts[opt] || 0) + 1
     })
   })
-  const data = Object.entries(counts)
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
+  // گزینه‌ای که در پاسخ‌های قدیمی هست ولی دیگر در فهرست گزینه‌ها نیست هم از قلم نیفتد
+  const names = [...options, ...Object.keys(counts).filter((k) => !options.includes(k))]
+  const data = names
+    .map((name, i) => {
+      const value = counts[name] || 0
+      return { name, value, pct: respondents > 0 ? round1((value / respondents) * 100) : 0, order: i }
+    })
+    .sort((a, b) => b.value - a.value || a.order - b.order)
+
+  const maxValue = Math.max(...data.map((d) => d.value))
+  const topItems = maxValue > 0 ? data.filter((d) => d.value === maxValue) : []
+  const isTie = topItems.length > 1
+  const ticks = [0, 25, 50, 75, 100]
+  const keepColors = { printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' } as React.CSSProperties
 
   return (
-    <div dir="ltr">
-      <ResponsiveContainer width="100%" height={Math.max(220, data.length * 70)}>
-        <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }} barSize={16} barCategoryGap={16}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-          <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            width={150}
-            tickMargin={8}
-            tick={<WrappedYAxisTick />}
-            interval={0}
-            axisLine={{ stroke: '#e2e8f0' }}
-            tickLine={false}
-          />
-          <Tooltip cursor={{ fill: '#f8fafc' }} />
-          <Bar dataKey="value" fill="#475569" radius={[0, 4, 4, 0]} isAnimationActive={false} />
-        </BarChart>
-      </ResponsiveContainer>
+    <div>
+      <div className="space-y-3">
+        {data.map((d) => (
+          <div key={d.name} title={`${fa(d.value)} نفر (${fmtPct(d.pct)})`}>
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <span className="text-xs text-slate-700 leading-snug">{d.name}</span>
+              <span className="shrink-0 text-[11px] text-slate-500 tabular-nums">
+                {fa(d.value)} نفر · <span className="font-semibold text-slate-800">{fmtPct(d.pct)}</span>
+              </span>
+            </div>
+            <div dir="ltr" className="relative h-3 rounded-sm bg-slate-100" style={keepColors}>
+              {ticks.slice(1, -1).map((t) => (
+                <span key={t} className="absolute top-0 bottom-0 w-px bg-white" style={{ left: `${t}%`, ...keepColors }} />
+              ))}
+              <div
+                className="absolute top-0 bottom-0 left-0 rounded-sm bg-slate-600"
+                style={{ width: `${Math.min(100, d.pct)}%`, ...keepColors }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div dir="ltr" className="relative h-4 mt-1.5 mx-1 text-[10px] text-slate-400 tabular-nums">
+        {ticks.map((t) => (
+          <span
+            key={t}
+            className="absolute top-0"
+            dir="rtl"
+            style={{ left: `${t}%`, transform: t === 0 ? 'none' : t === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }}
+          >
+            {`${fa(t)}٪`}
+          </span>
+        ))}
+      </div>
+      <p className="text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">
+        {topItems.length > 0 && (
+          <>
+            {isTie ? 'رای برابر' : 'بیشترین انتخاب'}: <span className="font-semibold text-slate-700">{fmtPct(topItems[0].pct)}</span> از {fa(respondents)} پاسخ‌دهنده برای{' '}
+            {topItems.map((t) => `«${t.name}»`).join(' و ')}
+          </>
+        )}
+        <span className="block mt-1">
+          درصدها از تعداد پاسخ‌دهندگان محاسبه شده‌اند؛ هر نفر {maxSelect ? `تا ${fa(maxSelect)} گزینه` : 'چند گزینه'} می‌توانست انتخاب کند، پس جمع درصدها از ۱۰۰٪ بیشتر می‌شود.
+        </span>
+      </p>
     </div>
   )
 }
@@ -655,7 +694,7 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
       <div className="flex items-center justify-center gap-8 mb-5">
         <div className="text-center">
           <p className="text-2xl font-bold text-slate-900">
-            {avg.toFixed(1)}
+            {fa1(avg)}
             <span className="text-base font-medium text-slate-400">{unit}</span>
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">میانگین</p>
@@ -663,7 +702,7 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
         <div className="w-px h-10 bg-slate-200" />
         <div className="text-center">
           <p className="text-2xl font-bold text-slate-900">
-            {median.toFixed(1)}
+            {fa1(median)}
             <span className="text-base font-medium text-slate-400">{unit}</span>
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">میانه</p>
@@ -684,18 +723,18 @@ function SliderChart({ answers, unit }: { answers: number[]; unit: string }) {
               left: `calc(${toPercent(val)}% * 0.96 + 8px)`,
               transform: 'translate(-50%, -50%)',
             }}
-            title={`${val}${unit}`}
+            title={`${fa(val)}${unit}`}
           />
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-slate-400 px-2 mb-4">
-        <span>{axisMin.toFixed(0)}{unit}</span>
-        <span>{axisMax.toFixed(0)}{unit}</span>
+        <span>{fa(Math.round(axisMin))}{unit}</span>
+        <span>{fa(Math.round(axisMax))}{unit}</span>
       </div>
 
       <div className="flex justify-center">
         <span className={`text-[11px] px-2.5 py-1 rounded border font-medium ${consensusColor}`}>
-          {consensusLabel} · انحراف {stdDev.toFixed(1)}{unit}
+          {consensusLabel} · انحراف {fa1(stdDev)}{unit}
         </span>
       </div>
     </div>
@@ -726,7 +765,7 @@ function SliderGroupChart({
         <ResponsiveContainer width="100%" height={Math.max(180, data.length * 44)}>
           <BarChart data={data} layout="vertical" margin={{ left: 10, right: 30, top: 4, bottom: 4 }} barSize={18} barCategoryGap={10}>
             <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-            <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
+            <XAxis type="number" tickFormatter={(v: any) => fa(Number(v))} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={{ stroke: '#e2e8f0' }} />
             <YAxis
               type="category"
               dataKey="name"
@@ -737,7 +776,7 @@ function SliderGroupChart({
               axisLine={{ stroke: '#e2e8f0' }}
               tickLine={false}
             />
-            <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${v}${options.unit}`} />
+            <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(v: any) => `${fa(Number(v))}${options.unit}`} />
             <Bar dataKey="value" radius={[0, 4, 4, 0]} isAnimationActive={false}>
               {data.map((entry) => (
                 <Cell key={entry.name} fill={entry.color} />
@@ -748,7 +787,7 @@ function SliderGroupChart({
       </div>
       {top && (
         <p className="text-[11px] text-slate-400 mt-2 pt-3 border-t border-slate-100">
-          بالاترین بازده مورد انتظار: <span className="font-semibold text-slate-700">{top.value}{options.unit}</span> برای «{top.name}»
+          بالاترین بازده مورد انتظار: <span className="font-semibold text-slate-700">{fa(top.value)}{options.unit}</span> برای «{top.name}»
         </p>
       )}
     </div>
@@ -807,7 +846,7 @@ function AllocationChart({ options, answers }: { options: string[]; answers: Rec
         میانگین تخصیص پیشنهادی کمیته
         {Math.abs(allocTotal - 100) > 0.05 && (
           <span className="block mt-1">
-            جمع درصدها به‌دلیل گرد کردن به یک رقم اعشار، {round1(allocTotal)}٪ شده است.
+            جمع درصدها به‌دلیل گرد کردن به یک رقم اعشار، {fmtPct(allocTotal)} شده است.
           </span>
         )}
       </p>

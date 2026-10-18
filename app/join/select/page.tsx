@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
@@ -16,6 +16,12 @@ export default function SelectSessionPage() {
   const router = useRouter()
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<Session | null>(null)
+  const [fullName, setFullName] = useState('')
+  const [role, setRole] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false) // جلوگیری از ثبت‌نام دوباره با چند کلیک پشت‌سرهم (state دیرتر از کلیک دوم به‌روز می‌شود)
+  const [formError, setFormError] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -34,29 +40,57 @@ export default function SelectSessionPage() {
     return new Date(session.expires_at).getTime() > Date.now()
   }
 
-  async function handleJoin(sessionId: string) {
-    const fullName = prompt('نام و نام خانوادگی خود را وارد کنید:')
-    if (!fullName || !fullName.trim()) return
+  // فرم ورود داخل خود صفحه است (نه prompt مرورگر)؛ prompt در مرورگرهای داخل برنامه‌ها (تلگرام، اینستاگرام و ...) کار نمی‌کند.
+  function openForm(s: Session) {
+    setSelected(s)
+    setFullName('')
+    setRole('')
+    setFormError('')
+  }
 
-    const role = prompt('سمت شما (اختیاری):') || null
+  function closeForm() {
+    if (submitting) return
+    setSelected(null)
+    setFormError('')
+  }
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!selected || submittingRef.current) return
+
+    const name = fullName.trim()
+    if (name.length < 2) {
+      setFormError('نام و نام خانوادگی را وارد کنید.')
+      return
+    }
+    if (!isActive(selected)) {
+      setFormError('زمان این جلسه به پایان رسیده است.')
+      return
+    }
+
+    submittingRef.current = true
+    setSubmitting(true)
+    setFormError('')
 
     const { data, error } = await supabase
       .from('participants')
       .insert({
-        session_id: sessionId,
-        full_name: fullName.trim(),
-        role: role?.trim() || null,
+        session_id: selected.id,
+        full_name: name,
+        role: role.trim() || null,
       })
       .select()
       .single()
 
     if (error || !data) {
-      alert('خطا در ثبت‌نام. لطفاً دوباره تلاش کنید.')
+      setFormError('خطا در ثبت‌نام. لطفاً دوباره تلاش کنید.')
+      submittingRef.current = false
+      setSubmitting(false)
       return
     }
 
     sessionStorage.setItem('participant_id', data.id)
-    sessionStorage.setItem('session_id', sessionId)
+    sessionStorage.setItem('session_id', selected.id)
     router.push('/questions')
   }
 
@@ -88,7 +122,7 @@ export default function SelectSessionPage() {
           {activeSessions.map((s) => (
             <button
               key={s.id}
-              onClick={() => handleJoin(s.id)}
+              onClick={() => openForm(s)}
               className="w-full text-right bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-900 transition flex items-center justify-between"
             >
               <div>
@@ -117,6 +151,69 @@ export default function SelectSessionPage() {
           ))}
         </div>
       </div>
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/40 flex items-end sm:items-center justify-center p-4"
+          onClick={closeForm}
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleJoin}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm bg-white rounded-xl border border-slate-200 p-5 shadow-lg"
+          >
+            <h2 className="text-sm font-bold text-slate-900 mb-0.5">ورود به جلسه</h2>
+            <p className="text-xs text-slate-500 mb-4">{selected.title}</p>
+
+            <label className="block text-xs font-medium text-slate-600 mb-1.5" htmlFor="full_name">
+              نام و نام خانوادگی
+            </label>
+            <input
+              id="full_name"
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              autoFocus
+              autoComplete="name"
+              maxLength={100}
+              className="w-full border border-slate-200 rounded-md px-3.5 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400"
+            />
+
+            <label className="block text-xs font-medium text-slate-600 mb-1.5" htmlFor="role">
+              سمت <span className="text-slate-400 font-normal">(اختیاری)</span>
+            </label>
+            <input
+              id="role"
+              type="text"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              maxLength={100}
+              className="w-full border border-slate-200 rounded-md px-3.5 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400"
+            />
+
+            {formError && <p className="text-xs text-red-600 mb-3">{formError}</p>}
+
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium py-2.5 rounded-md disabled:opacity-50 transition"
+              >
+                {submitting ? 'در حال ورود...' : 'ورود و شروع پرسشنامه'}
+              </button>
+              <button
+                type="button"
+                onClick={closeForm}
+                disabled={submitting}
+                className="px-4 text-sm text-slate-500 hover:text-slate-900 border border-slate-200 rounded-md disabled:opacity-50 transition"
+              >
+                انصراف
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
